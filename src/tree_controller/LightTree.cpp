@@ -6,7 +6,6 @@
 using namespace std::chrono_literals;
 
 // ---- Pin map: light name -> GPIO line offset ----
-// ADJUST THESE to match your actual wiring!
 const std::map<std::string, unsigned int> LightTree::PIN_MAP = {
     {"left_align",   1},
     {"center_ready", 2},
@@ -36,7 +35,7 @@ LightTree::LightTree(const std::string& chipName)
 }
 
 LightTree::~LightTree() {
-    // Safety: everything off before we exit
+
     allOff();
     for (auto& [name, line] : lines_) {
         line.release();
@@ -79,11 +78,11 @@ void LightTree::runSportsmanTree() {
     allOff();
     wait(1s);
 
-    // Pre-stage / stage
+    // pre-stage / stage
     onGroup({"left_align", "right_align", "center_ready"});
     wait(1s);
 
-    // Amber sequence
+    // yellow sequence
     on("yellow_1");
     wait(500ms);
     off("yellow_1");
@@ -91,7 +90,7 @@ void LightTree::runSportsmanTree() {
     wait(500ms);
     off("yellow_2");
 
-    // GREEN!
+    // green
     onGroup({"left_green", "right_green"});
     wait(3s);
 
@@ -107,12 +106,12 @@ void LightTree::runProTree() {
     onGroup({"left_align", "right_align", "center_ready"});
     wait(1s);
 
-    // All ambers together
+    // yellow
     onGroup({"yellow_1", "yellow_2"});
     wait(400ms);
     offGroup({"yellow_1", "yellow_2"});
 
-    // GREEN!
+    // green 
     onGroup({"left_green", "right_green"});
     wait(3s);
 

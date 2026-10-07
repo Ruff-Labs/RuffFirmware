@@ -1,6 +1,6 @@
 #pragma once
 //sudo apt install libgpiod-dev (INSTALL DEV HEADERS)
-#include <gpiod.hpp>
+//#include <gpiod.hpp>
 #include <map>
 #include <string>
 #include <vector>
@@ -32,7 +32,7 @@ public:
     void onPair(const std::vector<std::string>& names);
 
     // Pre-built race sequences
-    //FIXME: delete after testing. 
+    //FIXME: delete after testing.
     void runSportsmanTree();   // ambers 0.5s apart
     void runProTree();         // all ambers at once, 0.4s to green
 
