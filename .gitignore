@@ -82,7 +82,13 @@ coverage/
 
 # IDEs and editors
 
-.vscode/
+# Ignore the entire .vscode folder by default
+.vscode/*
+
+# But allow tracking the shared extensions and launch profiles
+!.vscode/extensions.json
+!.vscode/launch.json
+
 .idea/
 *.swp
 *.swo

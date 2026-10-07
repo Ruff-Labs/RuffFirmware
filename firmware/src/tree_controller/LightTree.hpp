@@ -1,6 +1,6 @@
 #pragma once
 //sudo apt install libgpiod-dev (INSTALL DEV HEADERS)
-//#include <gpiod.hpp>
+#include <gpiod.hpp>
 #include <map>
 #include <string>
 #include <vector>
@@ -37,8 +37,8 @@ public:
     void runProTree();         // all ambers at once, 0.4s to green
 
 private:
-    gpiod::chip chip_;
-    std::map<std::string, gpiod::line> lines_;
+    //gpiod::chip chip_;
+    //std::map<std::string, gpiod::line> lines_;
 
     // Helper for delays
     void wait(std::chrono::milliseconds ms);
