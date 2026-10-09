@@ -1,0 +1,23 @@
+module BoardGui
+singleton Theme 1.0 Theme.qml
+Main 1.0 Main.qml
+
+# Components
+AppButton 1.0 AppButton.qml
+Card 1.0 Card.qml
+NavBar 1.0 NavBar.qml                  # unused since the sidebar redesign
+NavTile 1.0 NavTile.qml
+PageHeader 1.0 PageHeader.qml
+SectionLabel 1.0 SectionLabel.qml
+SideBar 1.0 SideBar.qml
+SideNavItem 1.0 SideNavItem.qml
+# SensorCard 1.0 SensorCard.qml        (empty file - uncomment once written)
+
+# Screens
+MainScreen 1.0 MainScreen.qml
+RaceScreen 1.0 RaceScreen.qml
+SensorScreen 1.0 SensorScreen.qml
+SettingsScreen 1.0 SettingsScreen.qml
+SetupScreen 1.0 SetupScreen.qml
+# HomeScreen 1.0 HomeScreen.qml        (empty file - uncomment once written)
+# SensorsScreen 1.0 SensorsScreen.qml  (empty file - uncomment once written)

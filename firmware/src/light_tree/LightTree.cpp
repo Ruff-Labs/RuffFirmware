@@ -40,7 +40,7 @@ LightTree::~LightTree() {
     for (auto& [name, line] : lines_) {
         line.release();
     }
-    std::cout << "LightTree shut down safely.\n";
+    std::cout << "LightTree shut down.\n";
 }
 
 void LightTree::set(const std::string& name, bool state) {
@@ -111,7 +111,7 @@ void LightTree::runProTree() {
     wait(400ms);
     offGroup({"yellow_1", "yellow_2"});
 
-    // green 
+    // green
     onGroup({"left_green", "right_green"});
     wait(3s);
 

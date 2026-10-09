@@ -1,0 +1,29 @@
+<RCC>
+    <qresource prefix="/qt/qml/BoardGui">
+        <file alias="qmldir">qml/qmldir</file>
+        <file alias="Main.qml">qml/Main.qml</file>
+        <file alias="Theme.qml">qml/Theme.qml</file>
+
+        <file alias="AppButton.qml">qml/components/AppButton.qml</file>
+        <file alias="Card.qml">qml/components/Card.qml</file>
+        <file alias="NavBar.qml">qml/components/NavBar.qml</file>
+        <file alias="NavTile.qml">qml/components/NavTile.qml</file>
+        <file alias="PageHeader.qml">qml/components/PageHeader.qml</file>
+        <file alias="SectionLabel.qml">qml/components/SectionLabel.qml</file>
+        <file alias="SideBar.qml">qml/components/SideBar.qml</file>
+        <file alias="SideNavItem.qml">qml/components/SideNavItem.qml</file>
+        <!-- empty file - uncomment once written (and in qml/qmldir)
+        <file alias="SensorCard.qml">qml/components/SensorCard.qml</file>
+        -->
+
+        <file alias="MainScreen.qml">qml/screens/MainScreen.qml</file>
+        <file alias="RaceScreen.qml">qml/screens/RaceScreen.qml</file>
+        <file alias="SensorScreen.qml">qml/screens/SensorScreen.qml</file>
+        <file alias="SettingsScreen.qml">qml/screens/SettingsScreen.qml</file>
+        <file alias="SetupScreen.qml">qml/screens/SetupScreen.qml</file>
+        <!-- empty files - uncomment once written (and in qml/qmldir)
+        <file alias="HomeScreen.qml">qml/screens/HomeScreen.qml</file>
+        <file alias="SensorsScreen.qml">qml/screens/SensorsScreen.qml</file>
+        -->
+    </qresource>
+</RCC>

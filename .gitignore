@@ -112,3 +112,23 @@ coverage/
 .cache/
 .tmp/
 temp/
+
+# Qt / qmake
+
+*.stash
+.qmake.cache
+*.pro.user
+*.pro.user.*
+qrc_*.cpp
+moc_*.cpp
+moc_*.h
+moc_predefs.h
+ui_*.h
+*.qmlc
+*.jsc
+.rcc/
+.moc/
+.obj/
+.ui/
+gui/race_gui
+gui/race_gui.app/
