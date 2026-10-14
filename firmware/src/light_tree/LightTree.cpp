@@ -3,7 +3,7 @@
 #include <thread>
 #include <stdexcept>
 
-using namespace std::chrono_literals;
+using namespace std::chrono_literals; // built in time suffixes
 
 // ---- Pin map: light name -> GPIO line offset ----
 const std::map<std::string, unsigned int> LightTree::PIN_MAP = {
@@ -19,46 +19,42 @@ const std::map<std::string, unsigned int> LightTree::PIN_MAP = {
     {"blue",        14},
 };
 
-LightTree::LightTree(const std::string& chipName)
-    : chip_(chipName)
-{
-    for (const auto& [name, offset] : PIN_MAP) {
-        gpiod::line line = chip_.get_line(offset);
-        line.request(
-            {"light_tree", gpiod::line_request::DIRECTION_OUTPUT, 0},
-            0  // initial value = LOW (off)
-        );
-        lines_[name] = std::move(line);
-    }
-    std::cout << "LightTree initialized on " << chipName
-              << " (" << lines_.size() << " lines)\n";
+static gpiod::line_request make_request(const std::string& chip) {
+    gpiod::line::offsets offs;
+    for (const auto& [name, off] : PIN_MAP) offs.push_back(off);
+    return gpiod::chip("/dev/" + chip).prepare_request()
+        .set_consumer("light_tree")
+        .add_line_settings(offs, gpiod::line_settings()
+            .set_direction(gpiod::line::direction::OUTPUT)
+            .set_output_value(gpiod::line::value::INACTIVE))
+        .do_request();
 }
 
-LightTree::~LightTree() {
+LightTree::LightTree(const std::string& chipName) : request_(make_request(chipName)) {}
 
-    allOff();
-    for (auto& [name, line] : lines_) {
-        line.release();
-    }
-    std::cout << "LightTree shut down.\n";
-}
+LightTree::~LightTree() { allOff(); }   // request_ releases the lines itself
 
 void LightTree::set(const std::string& name, bool state) {
-    auto it = lines_.find(name);
-    if (it == lines_.end()) {
-        throw std::runtime_error("Unknown light: " + name);
-    }
-    it->second.set_value(state ? 1 : 0);
+    auto it = PIN_MAP.find(name);
+    if (it == PIN_MAP.end()) throw std::runtime_error("Unknown light: " + name);
+    request_.set_value(it->second, state ? gpiod::line::value::ACTIVE
+                                         : gpiod::line::value::INACTIVE);
+}
+
+void LightTree::allOff() {
+    for (const auto& [name, off] : PIN_MAP) request_.set_value(off, gpiod::line::value::INACTIVE);
 }
 
 void LightTree::on(const std::string& name)  { set(name, true);  }
 void LightTree::off(const std::string& name) { set(name, false); }
 
-void LightTree::allOff() {
-    for (auto& [name, line] : lines_) {
-        line.set_value(0);
-    }
-}
+// void LightTree::flash(const std::string& name, std::chrono::milliseconds time) {
+//     on(name);
+//     wait(time);
+//     off(name);
+// }
+
+
 
 void LightTree::onGroup(const std::vector<std::string>& names) {
     for (const auto& n : names) on(n);
@@ -71,6 +67,8 @@ void LightTree::offGroup(const std::vector<std::string>& names) {
 void LightTree::wait(std::chrono::milliseconds ms) {
     std::this_thread::sleep_for(ms);
 }
+
+
 
 // ---- Sportsman tree: ambers count down 0.5s apart ----
 void LightTree::runSportsmanTree() {
@@ -117,3 +115,4 @@ void LightTree::runProTree() {
 
     allOff();
 }
+
