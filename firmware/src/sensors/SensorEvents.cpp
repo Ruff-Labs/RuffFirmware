@@ -128,10 +128,10 @@ double ms(int64_t ns) { return ns / 1e6; } // converts from ns to ms
 void try_pair() {
     if (pending_in && pending_out) {
         int64_t delta = (int64_t)*pending_out - (int64_t)*pending_in;
-        // std::printf("  >> PAIR: outgoing - incoming = %+.3f ms %s\n",
-        //             ms(delta), delta < 0 ? "(outgoing crossed FIRST)" : "");
+        std::printf("  >> PAIR: outgoing - incoming = %+.3f ms %s\n",
+                    ms(delta), delta < 0 ? "(outgoing crossed FIRST)" : "");
 
-        //TODO: figure out the logic for this 
+        //TODO: figure out the logic for this
         pending_in.reset();
         pending_out.reset();
     }
