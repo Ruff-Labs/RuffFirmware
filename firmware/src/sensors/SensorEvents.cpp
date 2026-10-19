@@ -1,185 +1,118 @@
-// gates.cpp  —  8 sensors → 2 gates → paired crossing times
-#include <gpiod.hpp>
-#include <array>
-#include <condition_variable>
-#include <cstdint>
-#include <cstdio>
-#include <mutex>
-#include <optional>
-#include <queue>
-#include <thread>
-#include <unordered_map>
+// SensorEvents.cpp  —  2 lanes x 3 active-high signals, polled from the state machine loop
+#include "sensors/SensorEvents.hpp"
+#include <chrono>
 
 // ---------- settings ----------
-constexpr const char* CHIP_PATH  = "/dev/gpiochip2"; // find with `gpioinfo`
-constexpr bool        ACTIVE_LOW = true;             // NPN sensors with pull-ups
-constexpr uint64_t    REARM_NS   = 50'000'000;       // 50 ms: re-trips this soon after clearing = same crossing
+// glitch filter off for now: signals come in as clean 1/0
+// constexpr uint64_t REARM_NS = 50'000'000;   // 50 ms: a rise this soon after the last fall = same event (glitch)
 
-// direction aka right or left
-
-// (in)L* -- *R(out)
-
-enum Dir {
-    INCOMING = 0,
-    OUTGOING = 1
-};
-
-struct Sensor {
-    unsigned line;   // GPIO line offset on CHIP_PATH
-    Dir      dir;    // which gate it belongs to
-    int      bit;    // its position (0-3) inside that gate
-};
-
-// run gpioinfo on beagle will then get something like the following
-
-// gpiochip1 - 32 lines:
+// run gpioinfo on the beagle to find the offsets, e.g.
 //         line  26:      "P8_14"       unused   input  active-high
-//         line  27:      "P8_17"       unused   input  active-high
-//         line  28:      "P9_12"       unused   input  active-high
 
+struct LanePins {
+    bool     enabled;               // only enabled lanes get requested from the chip
+    unsigned line[NUM_SIGNALS];     // GPIO offsets, indexed by Signal: { BACK, FORWARD, ALIGN }
+};
 
-//TODO: change this later on
-const std::array<Sensor, 8> SENSORS = {{
-    {  7, INCOMING, 0 },
-    {  8, INCOMING, 1 },
-    {  9, INCOMING, 2 },
-    { 10, INCOMING, 3 },
-
-    { 11, OUTGOING, 0 },
-    { 12, OUTGOING, 1 },
-    { 13, OUTGOING, 2 },
-    { 14, OUTGOING, 3 },
+//TODO: change these to the real offsets
+const std::array<LanePins, NUM_LANES> LANE_PINS = {{
+    { true,  {  7,  8,  9 } },   // lane 1
+    { false, { 10, 11, 12 } },   // lane 2 (not wired yet)
 }};
 
-// ---------- one raw sensor change ----------
-struct SensorEvent {
-    uint64_t t_ns;     // kernel timestamp
-    int      sensor;   // index into SENSORS
-    bool     blocked;  // true = beam blocked
-};
-
-// ---------- thread-safe queue (same as before) ----------
-class EventQueue {
-public:
-    void push(const SensorEvent& e) {
-        { std::lock_guard<std::mutex> lk(m_); q_.push(e); }
-        cv_.notify_one();
-    }
-    SensorEvent pop() {
-        std::unique_lock<std::mutex> lk(m_);
-        cv_.wait(lk, [&] { return !q_.empty(); });
-        SensorEvent e = q_.front(); q_.pop();
-        return e;
-    }
-private:
-    std::queue<SensorEvent> q_; // line of events first in first out
-    std::mutex m_;              // lock for the the thread
-    std::condition_variable cv_;// causes the thread to sleep until its told something changed
-};
-
-// ---------- worker thread: watches all 8 pins ----------
-void sensor_worker(EventQueue& out) {
+// ---------- setup ----------
+gpiod::line_request Sensors::request_lines(const std::string& chipPath, LineMap& map) {
     gpiod::line_settings settings;
     settings.set_direction(gpiod::line::direction::INPUT)
             .set_edge_detection(gpiod::line::edge::BOTH)
-            .set_bias(ACTIVE_LOW ? gpiod::line::bias::PULL_UP
-                                 : gpiod::line::bias::AS_IS);
+            .set_event_clock(gpiod::line::clock::MONOTONIC)   // same clock as std::chrono::steady_clock
+            .set_bias(gpiod::line::bias::AS_IS);              // TODO: PULL_DOWN if the source only drives high
 
     gpiod::line::offsets offsets;
-    std::unordered_map<unsigned, int> line_to_sensor;   // pin number -> SENSORS index
-    for (int i = 0; i < (int)SENSORS.size(); ++i) {
-        offsets.push_back(SENSORS[i].line);
-        line_to_sensor[SENSORS[i].line] = i;
+    for (int l = 0; l < NUM_LANES; ++l) {
+        if (!LANE_PINS[l].enabled) continue;
+        for (int s = 0; s < NUM_SIGNALS; ++s) {
+            map[LANE_PINS[l].line[s]] = { l, Signal(s) };
+            offsets.push_back(LANE_PINS[l].line[s]);
+        }
     }
 
-    auto request = gpiod::chip(CHIP_PATH)
+    return gpiod::chip(chipPath)
         .prepare_request()
-        .set_consumer("qm-gates")
-        .add_line_settings(offsets, settings)   // all 8 pins in ONE request
+        .set_consumer("ruff-sensors")
+        .add_line_settings(offsets, settings)   // all enabled pins in ONE request
         .do_request();
+}
 
-    gpiod::edge_event_buffer buffer(64);
-    for (;;) { // condition loops forever
-        request.read_edge_events(buffer);       // sleep until any pin changes
-        for (const auto& ev : buffer) {
-            int  s    = line_to_sensor.at(ev.line_offset());   // which sensor?
-            bool rose = ev.type() == gpiod::edge_event::event_type::RISING_EDGE; // the rising edge
-            bool on   = ACTIVE_LOW ? !rose : rose;             // dark-on: on = blocked
-            out.push({ ev.timestamp_ns().ns(), s, on });
+Sensors::Sensors(const std::string& chipPath)
+    : request_(request_lines(chipPath, line_map_)),
+      buffer_(64) {
+    // edges only report changes, so grab the starting levels (a dog may already be aligned at boot)
+    for (auto& [line, pin] : line_map_)
+        lanes_[pin.lane].high[pin.sig] = request_.get_value(line) == gpiod::line::value::ACTIVE;
+}
+
+// ---------- pass logic ----------
+// edges are handled in the order they happened, so FORWARD -> BACK inside one poll still works
+// ASSUMED (not yet checked on hardware): a dog crossing goes ALIGN -> FORWARD -> BACK -> ALIGN,
+// with ALIGN dropping while the beam is broken. Verify with gpiomon once the sensors are wired.
+static void track_pass(LaneSignals& ln, Signal sig, uint64_t t) {
+    switch (sig) {
+      case ALIGN:                       // beam back on the reflector = lane ready; doesn't touch the pass
+        break;                          // (it comes back right after a dog clears the beam)
+      case FORWARD:
+        if (!ln.forward_armed) {        // keep the first break if FORWARD bounces
+            ln.forward_armed = true;
+            ln.t_pass        = t;
+        }
+        break;
+      case BACK:
+        if (ln.forward_armed) ln.passed = true;   // FORWARD then BACK = valid pass
+        // BACK without FORWARD first = wrong direction, ignored
+        ln.forward_armed = false;
+        break;
+    }
+}
+
+// ---------- non-blocking read ----------
+void Sensors::poll() {
+    for (auto& ln : lanes_)
+        for (bool& r : ln.rose) r = false;
+
+    // timeout 0 = just check, never sleep. Timestamps come from the kernel at the
+    // moment of the edge, so reading them a tick late doesn't hurt accuracy.
+    while (request_.wait_edge_events(std::chrono::nanoseconds(0))) {
+        request_.read_edge_events(buffer_);
+        for (const auto& ev : buffer_) {
+            const PinRef& pin = line_map_.at(ev.line_offset());
+            LaneSignals&  ln  = lanes_[pin.lane];
+            const uint64_t t  = ev.timestamp_ns().ns();
+            const bool rising = ev.type() == gpiod::edge_event::event_type::RISING_EDGE; // active high
+
+            ln.high[pin.sig] = rising;
+            if (rising) {
+                // bool glitch = ln.t_fall[pin.sig] && (t - ln.t_fall[pin.sig] < REARM_NS);
+                // if (!glitch) {
+                    ln.t_rise[pin.sig] = t;
+                    ln.rose[pin.sig]   = true;
+                    track_pass(ln, pin.sig, t);
+                // }
+            } else {
+                ln.t_fall[pin.sig] = t;
+            }
         }
     }
 }
 
-// ---------- gate logic ----------
-struct Gate {
-    const char* name;
-    uint8_t  mask    = 0;   // bit set = that sensor is blocked
-    uint64_t t_enter = 0;   // when the gate was first broken
-    uint64_t t_exit  = 0;   // when the gate fully cleared
-};
-
-std::array<Gate, 2> gates = {{ { "INCOMING" }, { "OUTGOING" } }};
-std::optional<uint64_t> pending_in, pending_out;   // entries waiting to be paired
-
-double ms(int64_t ns) { return ns / 1e6; } // converts from ns to ms
-
-// waits until there is one unpaired incoming entry and one unpaired outgoing entry then prints the t_out-t_in
-// it will reset both
-void try_pair() {
-    if (pending_in && pending_out) {
-        int64_t delta = (int64_t)*pending_out - (int64_t)*pending_in;
-        std::printf("  >> PAIR: outgoing - incoming = %+.3f ms %s\n",
-                    ms(delta), delta < 0 ? "(outgoing crossed FIRST)" : "");
-
-        //TODO: figure out the logic for this
-        pending_in.reset();
-        pending_out.reset();
-    }
-}
-
-
-// The difference between the countdown timer and the triggered event to display
-// an early or false start. Signified by a negative number and indicates a red LED
-// light for 2 seconds.
-void isFault(){
-    // displays the negative value and indicates the red led light for 2 seconds
-}
-
-
-void handle(const SensorEvent& e) {
-    const Sensor& s = SENSORS[e.sensor];
-    Gate& g = gates[s.dir];
-
-    uint8_t before = g.mask;
-    if (e.blocked) g.mask |=  (1u << s.bit);    // set this sensor bit
-    else           g.mask &= ~(1u << s.bit);    // clear this sensor bit
-
-    if (before == 0 && g.mask != 0) {           // gate just got broken
-        bool same_crossing = g.t_exit && (e.t_ns - g.t_exit < REARM_NS);
-        if (!same_crossing) {
-            g.t_enter = e.t_ns;
-            std::printf("%s entered @ %.3f ms (sensor %d)\n",
-                        g.name, ms(g.t_enter), s.bit + 1);
-            if (s.dir == INCOMING) pending_in  = g.t_enter;
-            else                   pending_out = g.t_enter;
-            try_pair();
+void Sensors::reset() {
+    for (auto& ln : lanes_) {
+        for (int s = 0; s < NUM_SIGNALS; ++s) {
+            ln.rose[s]   = false;
+            ln.t_rise[s] = 0;
+            ln.t_fall[s] = 0;
         }
-    } else if (before != 0 && g.mask == 0) {    // all 4 beams clear again
-        g.t_exit = e.t_ns;
-        std::printf("%s cleared @ %.3f ms (blocked %.1f ms)\n",
-                    g.name, ms(g.t_exit), ms(g.t_exit - g.t_enter));
+        ln.forward_armed = false;
+        ln.passed        = false;
+        ln.t_pass        = 0;
     }
-}
-
-int main() {
-    EventQueue events;
-    std::thread([&] {
-        try { sensor_worker(events); }
-        catch (const std::exception& ex) {
-            std::fprintf(stderr, "GPIO error: %s\n", ex.what());
-            std::exit(1);
-        }
-    }).detach();
-
-    for (;;) handle(events.pop());
 }

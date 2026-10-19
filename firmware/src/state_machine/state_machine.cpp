@@ -1,4 +1,7 @@
-#include "LightTree.hpp"   // build with -I src/light_tree
+#include "light_tree/LightTree.hpp"
+#include "remote/Remote.hpp"
+#include "sensors/SensorEvents.hpp"
+#include "timer/Timer.hpp"
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -41,13 +44,14 @@ constexpr int SEQ_LEN = sizeof(SEQUENCE) / sizeof(SEQUENCE[0]);
 // Filled once per loop by poll_inputs() before race_tick().
 // TODO: move into the eventFlags structs once those are filled in
 struct RaceInputs {
-    bool judge_ready      = false;            // TODO: from remote
-    bool start_pressed    = false;            // TODO: from remote
-    bool judge_ack        = false;            // TODO: from remote (clears the finished screen)
-    bool abort            = false;            // TODO: from remote (judge cancel / e-stop)
-    bool lane_aligned[2]  = { false, false }; // TODO: from sensors, dog staged in lane
-    bool beam_broken[2]   = { false, false }; // TODO: from sensors, gate mask != 0 for that lane
-    bool lane_done[2]     = { false, false }; // TODO: from sensors, try_pair() result for that lane
+    bool judge_ready      = false;            // from remote: READY latch
+    bool start_pressed    = false;            // from remote: START (one tick)
+    bool judge_ack        = false;            // from remote: RESET, clears the finished screen (one tick)
+    bool abort            = false;            // from remote: judge cancel / e-stop (one tick)
+    bool lane_aligned[2]  = { false, false }; // from sensors: ALIGN high = beam reflecting across the lane, lane ready
+    bool beam_broken[2]   = { false, false }; // from sensors: FORWARD or BACK broken (false start before green)
+    bool lane_done[2]     = { false, false }; // from sensors: valid pass, FORWARD broke before BACK
+    Clock::time_point t_done[2]{};            // kernel timestamp of that pass (when FORWARD broke)
 };
 
 // ---------- per-race data, wiped in Reset ----------
@@ -64,8 +68,8 @@ struct RaceMachine {
     RaceState prev  = RaceState::Idle;      // != state so the first tick runs entry actions
     Clock::time_point entered{};            // when the current state was entered
     Clock::time_point step_started{};       // when the current sequence light came on
-    int seq_step = 0;
-    RaceData data;
+    int seq_step = 0;                       // current sequence state
+    RaceData data;                          // current race data 
 };
 
 // ---------- helpers ----------
@@ -88,7 +92,9 @@ static int pick_winner(const RaceData& d) {
 }
 
 static void write_race_table(const RaceData& d) {
-    // TODO: hand this off to the database code once it exists
+    // TODO: hand this off to the database code (Database.cpp TODO 8):
+    //   1. db.save_race(..., &saved)  -> CSV backup on the board, must succeed first
+    //   2. sync.enqueue(saved)        -> same rows to Supabase in the background (never blocks)
     auto ms_since_green = [&](int lane) {
         return std::chrono::duration<double, std::milli>(d.t_finish[lane] - d.t_green).count();
     };
@@ -101,7 +107,7 @@ static void write_race_table(const RaceData& d) {
 }
 
 // ---------- the state machine ----------
-void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree) {
+void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& sensors, Remote& remote, Timer& timer) {
     const auto now = Clock::now();
 
     // judge abort works from anywhere
@@ -127,7 +133,7 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree) {
         if (entering) tree.on("center_ready");
         show_alignment(tree, in);
 
-        // dog stepped off the line or judge un-readied -> back to Idle
+        // lane lost alignment or judge un-readied -> back to Idle
         if (!in.judge_ready || !in.lane_aligned[LEFT] || !in.lane_aligned[RIGHT]) {
             tree.off("center_ready");
             m.state = RaceState::Idle;
@@ -139,6 +145,7 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree) {
       case RaceState::Sequence:
         if (entering) {
             tree.offGroup({ "left_align", "right_align", "center_ready" });
+            sensors.reset();   // drop any breaks/passes from before the countdown (people walking through, last race)
             m.seq_step     = 0;
             m.step_started = now;
             tree.on(SEQUENCE[0].light);
@@ -172,9 +179,7 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree) {
         for (int lane : { LEFT, RIGHT }) {
             if (in.lane_done[lane] && !m.data.finished[lane]) {
                 m.data.finished[lane] = true;
-                m.data.t_finish[lane] = now;
-                // TODO: use the gpiod event timestamp (Gate.t_enter) instead of now()
-                //       for sub-ms accuracy once sensors pass it through
+                m.data.t_finish[lane] = in.t_done[lane];   // edge timestamp, not tick time
             }
         }
         // TODO: record per-dog splits here once try_pair() logic is done
@@ -210,9 +215,10 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree) {
 
       case RaceState::Reset:
         tree.allOff();
-        m.data     = RaceData{};
+        remote.clear_ready();   // judge has to press READY again for the next race
+        timer.reset();
+        m.data = RaceData{};
         m.seq_step = 0;
-        // TODO: also clear sensor gate masks / pending_in/out once those live somewhere shared
         m.state = RaceState::Idle;
         break;
 
@@ -223,23 +229,33 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree) {
 }
 
 // ---------- input polling ----------
-void poll_inputs(RaceInputs& in) {
-    // TODO: drain the sensor EventQueue here with a NON-blocking try_pop()
-    //       (EventQueue::pop() blocks and would freeze the state machine)
-    //       and run each event through handle() to update the gates
-    // TODO: map gates -> in.beam_broken / in.lane_done / in.lane_aligned
-    // TODO: read the remote -> in.judge_ready / start_pressed / judge_ack / abort
-    (void)in;
+void poll_inputs(Sensors& sensors, Remote& remote, RaceInputs& in) {
+    sensors.poll();   // non-blocking, no sensor thread needed
+    for (int lane : { LEFT, RIGHT }) {   // lane 1 = LEFT, lane 2 = RIGHT
+        const LaneSignals& s = sensors.lane(lane);
+        in.lane_aligned[lane] = s.high[ALIGN];
+        // rose[] catches a break that started and cleared within one tick
+        in.beam_broken[lane]  = s.high[FORWARD] || s.high[BACK] || s.rose[FORWARD] || s.rose[BACK];
+        in.lane_done[lane]    = s.passed;
+        in.t_done[lane]       = Clock::time_point(std::chrono::nanoseconds(s.t_pass)); // gpiod uses CLOCK_MONOTONIC too
+    }
+
+    RemoteInputs r   = remote.poll();   // non-blocking
+    in.judge_ready   = r.judge_ready;
+    in.start_pressed = r.start_pressed;
+    in.judge_ack     = r.judge_ack;
+    in.abort         = r.abort;
 }
 
 // ---------- main loop ----------
-// TODO: call this from main.cpp once the sensor thread is started there
-void run_race(LightTree& tree) {
+// TODO: call this from main.cpp once LightTree + Sensors + Remote (remote.begin()) are set up there
+// TODO: also pass in the Database + SupabaseSync that main.cpp opens/starts
+void run_race(LightTree& tree, Sensors& sensors, Remote& remote) {
     RaceMachine m;
     RaceInputs  in;
     for (;;) {
-        poll_inputs(in);
-        race_tick(m, in, tree);
+        poll_inputs(sensors, remote, in);
+        race_tick(m, in, tree, sensors, remote);
         std::this_thread::sleep_for(1ms);   // 1 kHz tick; timing accuracy comes from timestamps, not this
     }
 }

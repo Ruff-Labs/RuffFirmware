@@ -1,0 +1,32 @@
+[Unit]
+Description=Board Qt GUI
+# Start after the firmware, but don't die with it (no IPC between them yet)
+After=firmware.service systemd-user-sessions.service
+Wants=firmware.service
+# eglfs takes over the display, so keep the login console off tty1
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=debian
+Group=debian
+SupplementaryGroups=video render input
+WorkingDirectory=/home/debian/project
+ExecStart=/home/debian/project/build/gui/gui
+
+# Draw straight to the display, no desktop needed
+Environment=QT_QPA_PLATFORM=eglfs
+Environment=QT_QPA_EGLFS_HIDECURSOR=1
+# If the GPU/EGL driver isn't working on the board, use this instead:
+# Environment=QT_QPA_PLATFORM=linuxfb
+
+# /run/user/1000 only exists while debian is logged in, so give the GUI its own
+RuntimeDirectory=gui
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/gui
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Board firmware (sensors, light tree, remote, race DB)
+# Race results are timestamped and the board has no RTC battery, so wait for NTP
+# to set the clock (otherwise dates in data/UFLI_races.csv come out as 1970)
+Wants=time-sync.target network-online.target
+After=time-sync.target network-online.target
+
+[Service]
+# Runs as root for now: sensors, light tree and remote all open /dev/gpiochip*
+# directly via libgpiod (same reason TreeTest is run with sudo). Switch to
+# User=debian + SupplementaryGroups=gpio once a udev rule grants gpio access.
+WorkingDirectory=/home/debian/project
+# Supabase settings: SUPABASE_URL, SUPABASE_KEY (anon key), BOARD_ID.
+# The leading '-' means a missing file is OK: the firmware then runs CSV-only.
+EnvironmentFile=-/etc/ruff/firmware.env
+ExecStart=/home/debian/project/build/firmware/firmware
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

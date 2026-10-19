@@ -1,4 +1,4 @@
-#include "LightTree.hpp"
+#include "light_tree/LightTree.hpp"
 #include <iostream>
 #include <thread>
 #include <stdexcept>

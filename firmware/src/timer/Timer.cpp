@@ -9,7 +9,7 @@
 //   6. reset():  clear everything
 //   7. readouts: elapsed_ms() for the live GUI, race_ms() for results
 //   8. wire into state_machine.cpp (replace RaceData timing fields)
-#include "Timer.hpp"
+#include "timer/Timer.hpp"
 #include <ctime>
 
 // ---------- settings ----------
@@ -72,7 +72,6 @@ void Timer::foul(int lane, uint64_t t_ns) {
 
 // ---------- 6. reset ----------
 void Timer::reset() {
-    // TODO(6): call from RaceState::Reset
     running_    = false;
     t_green_    = 0;
     wall_start_ = {};
@@ -82,8 +81,8 @@ void Timer::reset() {
 // ---------- 7. readouts ----------
 double Timer::elapsed_ms(uint64_t now) const {
     // TODO(7): live stopwatch for the GUI RaceScreen (replaces its UI-only QML Timer)
-    //   if (!running_) return 0;
-    //   return ns_to_ms(now - t_green_);
+    if (!running_) return 0;
+    return ns_to_ms(now - t_green_);
     (void)now;
     return 0.0;
 }
