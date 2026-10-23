@@ -12,3 +12,12 @@ qt_add_executable(gui
 )
 
 target_link_libraries(gui PRIVATE Qt6::Quick Qt6::QuickControls2 common)
+
+# On macOS, build race_gui.app (same name gui.pro produced) instead of a bare binary
+# (Apple-only so the board binary stays build/gui/gui, which gui.service runs)
+if(APPLE)
+    set_target_properties(gui PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME race_gui
+    )
+endif()

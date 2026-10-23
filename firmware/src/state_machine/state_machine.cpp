@@ -22,7 +22,7 @@ enum class RaceState {
 enum Lane { LEFT = 0, RIGHT = 1 };
 
 // ---------- tuning ----------
-constexpr auto FALSE_START_FLASH = 2s;    // red light on time
+constexpr auto FALSE_START_FLASH = 2s;    // heat stays stopped at least this long before it can restart
 constexpr auto RACE_TIMEOUT      = 60s;   // TODO: pick a real max race length
 constexpr auto FINISHED_HOLD     = 5s;    // how long the winner light stays if judge never acks
 
@@ -54,13 +54,20 @@ struct RaceInputs {
     Clock::time_point t_done[2]{};            // kernel timestamp of that pass (when FORWARD broke)
 };
 
-// ---------- per-race data, wiped in Reset ----------
+// ---------- per-race data, wiped in Reset (NOT on a false-start restart) ----------
+// False start rules:
+//   1st (either team)          -> stop heat, red marker on, restart the sequence
+//   2nd by the same team       -> red marker on, heat continues, that dog owes a rerun
+//   2nd at the same start as the other team's 1st -> the 1st wins: stop + restart, the 2nd isn't counted
+// TODO: counts reset with every heat for now; if the limit covers a whole race (several heats), keep them across Reset
 struct RaceData {
     Clock::time_point t_green{};
     Clock::time_point t_finish[2]{};
-    bool finished[2]    = { false, false };
-    bool false_start[2] = { false, false };
-    int  winner         = -1;               // -1 = no winner (both faulted / timeout)
+    bool finished[2]     = { false, false };
+    int  false_starts[2] = { 0, 0 };        // counted false starts, kept across restarts
+    bool broke_early[2]  = { false, false }; // broke the beam during the current countdown
+    int  reruns_owed[2]  = { 0, 0 };        // infractions that need a rerun (TODO: enforce in step 2)
+    int  winner          = -1;              // -1 = no winner (timeout / nobody finished)
 };
 
 struct RaceMachine {
@@ -78,16 +85,13 @@ static void show_alignment(LightTree& tree, const RaceInputs& in) {
     tree.set(ALIGN_LIGHT[RIGHT], in.lane_aligned[RIGHT]);
 }
 
+// a false start no longer forfeits: fastest team to complete the heat wins
+// TODO(step 2): a lane only counts as finished once its reruns_owed are run; only Regular teams can win
 static int pick_winner(const RaceData& d) {
-    bool ok[2] = { d.finished[LEFT]  && !d.false_start[LEFT],
-                   d.finished[RIGHT] && !d.false_start[RIGHT] };
-    if (ok[LEFT] && ok[RIGHT])
+    if (d.finished[LEFT] && d.finished[RIGHT])
         return d.t_finish[LEFT] <= d.t_finish[RIGHT] ? LEFT : RIGHT; // TODO: tie rule
-    if (ok[LEFT])  return LEFT;
-    if (ok[RIGHT]) return RIGHT;
-    // one lane faulted and the other never finished -> other lane still wins
-    if (d.false_start[LEFT]  && !d.false_start[RIGHT]) return RIGHT;
-    if (d.false_start[RIGHT] && !d.false_start[LEFT])  return LEFT;
+    if (d.finished[LEFT])  return LEFT;
+    if (d.finished[RIGHT]) return RIGHT;
     return -1;
 }
 
@@ -99,9 +103,9 @@ static void write_race_table(const RaceData& d) {
         return std::chrono::duration<double, std::milli>(d.t_finish[lane] - d.t_green).count();
     };
     for (int lane : { LEFT, RIGHT }) {
-        if (d.false_start[lane])   std::printf("lane %d: FALSE START\n", lane);
-        else if (d.finished[lane]) std::printf("lane %d: %.3f ms\n", lane, ms_since_green(lane));
-        else                       std::printf("lane %d: DNF\n", lane);
+        if (d.finished[lane]) std::printf("lane %d: %.3f ms", lane, ms_since_green(lane));
+        else                  std::printf("lane %d: DNF", lane);
+        std::printf("  (false starts: %d, reruns owed: %d)\n", d.false_starts[lane], d.reruns_owed[lane]);
     }
     std::printf("winner: %d\n", d.winner);
 }
@@ -148,16 +152,31 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& s
             sensors.reset();   // drop any breaks/passes from before the countdown (people walking through, last race)
             m.seq_step     = 0;
             m.step_started = now;
+            m.data.broke_early[LEFT] = m.data.broke_early[RIGHT] = false;
             tree.on(SEQUENCE[0].light);
         }
 
         // leaving before green = false start
-        for (int lane : { LEFT, RIGHT })
-            if (in.beam_broken[lane]) m.data.false_start[lane] = true;
-        if (m.data.false_start[LEFT] || m.data.false_start[RIGHT]) {
-            tree.off(SEQUENCE[m.seq_step].light);
-            m.state = RaceState::FalseStart;
-            break;
+        {
+            bool any_first = false;
+            for (int lane : { LEFT, RIGHT }) {
+                if (in.beam_broken[lane] && !m.data.broke_early[lane]) {
+                    m.data.broke_early[lane] = true;   // latch: the dog stays in the beam for many ticks
+                    tree.on(RED_LIGHT[lane]);          // infraction marker
+                    // TODO: timer.foul(lane, t) once Timer::foul no longer ends the lane
+                }
+                if (m.data.broke_early[lane] && m.data.false_starts[lane] == 0) any_first = true;
+            }
+            if (any_first) {
+                // a 1st false start stops the heat; a 2nd at the same start is superseded and not counted
+                for (int lane : { LEFT, RIGHT })
+                    if (m.data.broke_early[lane] && m.data.false_starts[lane] == 0)
+                        m.data.false_starts[lane] = 1;
+                tree.off(SEQUENCE[m.seq_step].light);
+                m.state = RaceState::FalseStart;
+                break;
+            }
+            // only 2nd false starts so far: keep counting down, they get committed at green
         }
 
         // advance to the next light when this one's time is up
@@ -169,6 +188,13 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& s
             } else {
                 tree.onGroup({ GREEN_LIGHT[LEFT], GREEN_LIGHT[RIGHT] });
                 m.data.t_green = now;   // timer starts here
+                // 2nd false starts: heat continues, the dog reruns at the end of the line-up
+                for (int lane : { LEFT, RIGHT }) {
+                    if (m.data.broke_early[lane]) {
+                        m.data.false_starts[lane]++;
+                        m.data.reruns_owed[lane]++;
+                    }
+                }
                 // TODO: hand t_green to the Timer code once it exists
                 m.state = RaceState::Running;
             }
@@ -177,7 +203,8 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& s
 
       case RaceState::Running:
         for (int lane : { LEFT, RIGHT }) {
-            if (in.lane_done[lane] && !m.data.finished[lane]) {
+            // t_done > t_green skips a pass latched before green (a dog that false started a 2nd time)
+            if (in.lane_done[lane] && !m.data.finished[lane] && in.t_done[lane] > m.data.t_green) {
                 m.data.finished[lane] = true;
                 m.data.t_finish[lane] = in.t_done[lane];   // edge timestamp, not tick time
             }
@@ -188,17 +215,14 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& s
         break;
 
       case RaceState::FalseStart:
-        if (entering) {
-            for (int lane : { LEFT, RIGHT })
-                if (m.data.false_start[lane]) tree.on(RED_LIGHT[lane]);
-            // TODO: isFault() display of the negative reaction time
-        }
+        // heat stopped on a 1st false start. Red markers stay on until Reset/Finished.
+        // TODO: isFault() display of the negative reaction time
+        // "stopped in error" needs no extra code: a stop only happens on a 1st false start,
+        // so both teams already have no more than one when the heat resumes
         if (in_state >= FALSE_START_FLASH) {
-            tree.off(RED_LIGHT[LEFT]);
-            tree.off(RED_LIGHT[RIGHT]);
-            // false start = forfeit; other lane wins
-            // TODO: confirm rule — if it should be a rerun instead, go to Reset here
-            m.state = RaceState::Finished;
+            // restart: back to Idle -> Ready (dogs re-aligned, judge still READY) -> START.
+            // Not Reset: that would wipe the false start counts and clear READY.
+            m.state = RaceState::Idle;
         }
         break;
 
@@ -253,9 +277,10 @@ void poll_inputs(Sensors& sensors, Remote& remote, RaceInputs& in) {
 void run_race(LightTree& tree, Sensors& sensors, Remote& remote) {
     RaceMachine m;
     RaceInputs  in;
+    Timer       timer;
     for (;;) {
         poll_inputs(sensors, remote, in);
-        race_tick(m, in, tree, sensors, remote);
+        race_tick(m, in, tree, sensors, remote, timer);
         std::this_thread::sleep_for(1ms);   // 1 kHz tick; timing accuracy comes from timestamps, not this
     }
 }

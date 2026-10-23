@@ -1,6 +1,14 @@
 # libgpiod v2 C++ bindings (apt: libgpiod-dev, Debian 13+)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GPIOD REQUIRED IMPORTED_TARGET libgpiodcxx>=2.0)
+# Linux-only, so on macOS the hardware targets are skipped and the rest of the project still configures
+find_package(PkgConfig)
+if(PkgConfig_FOUND)
+    pkg_check_modules(GPIOD IMPORTED_TARGET libgpiodcxx>=2.0)
+endif()
+
+if(NOT GPIOD_FOUND)
+    message(WARNING "libgpiodcxx not found, skipping firmware and tree_test (build on the BeaglePlay)")
+    return()
+endif()
 
 # Supabase upload (apt: libcurl4-openssl-dev)
 find_package(CURL REQUIRED)
