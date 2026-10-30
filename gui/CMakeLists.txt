@@ -1,5 +1,5 @@
 # 6.5+ for QQmlApplicationEngine::loadFromModule (used in main.cpp)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Network)   # Network: virtual remote (UDP)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -8,10 +8,12 @@ set(CMAKE_AUTORCC ON)
 # which is how loadFromModule("BoardGui", "Main") finds it — same as gui.pro
 qt_add_executable(gui
     main.cpp
+    backend/virtual_remote.cpp
+    backend/virtual_remote.h
     resources.qrc
 )
 
-target_link_libraries(gui PRIVATE Qt6::Quick Qt6::QuickControls2 common)
+target_link_libraries(gui PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Network common)
 
 # On macOS, build race_gui.app (same name gui.pro produced) instead of a bare binary
 # (Apple-only so the board binary stays build/gui/gui, which gui.service runs)

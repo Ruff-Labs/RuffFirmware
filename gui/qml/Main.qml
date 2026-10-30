@@ -20,6 +20,7 @@ ApplicationWindow {
         "setup":    setupScreen,
         "sensor":   sensorScreen,
         "race":     raceScreen,
+        "remote":   remoteScreen,
         "settings": settingsScreen
     })
 
@@ -101,5 +102,6 @@ ApplicationWindow {
     Component { id: setupScreen;    SetupScreen    { onStartRace: window.navigateTo("race") } }
     Component { id: sensorScreen;   SensorScreen   {} }
     Component { id: raceScreen;     RaceScreen     {} }
+    Component { id: remoteScreen;   RemoteScreen   {} }
     Component { id: settingsScreen; SettingsScreen {} }
 }

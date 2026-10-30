@@ -3,7 +3,7 @@
 #include <thread>
 #include <stdexcept>
 
-using namespace std::chrono_literals; // built in time suffixes
+using namespace std::chrono_literals; // 1s, 500ms, ...
 
 // ---- Pin map: light name -> GPIO line offset ----
 const std::map<std::string, unsigned int> LightTree::PIN_MAP = {
@@ -19,7 +19,7 @@ const std::map<std::string, unsigned int> LightTree::PIN_MAP = {
     {"blue",        14},
 };
 
-static gpiod::line_request make_request(const std::string& chip) {
+gpiod::line_request LightTree::make_request(const std::string& chip) {
     gpiod::line::offsets offs;
     for (const auto& [name, off] : PIN_MAP) offs.push_back(off);
     return gpiod::chip("/dev/" + chip).prepare_request()
@@ -48,14 +48,6 @@ void LightTree::allOff() {
 void LightTree::on(const std::string& name)  { set(name, true);  }
 void LightTree::off(const std::string& name) { set(name, false); }
 
-// void LightTree::flash(const std::string& name, std::chrono::milliseconds time) {
-//     on(name);
-//     wait(time);
-//     off(name);
-// }
-
-
-
 void LightTree::onGroup(const std::vector<std::string>& names) {
     for (const auto& n : names) on(n);
 }
@@ -67,8 +59,6 @@ void LightTree::offGroup(const std::vector<std::string>& names) {
 void LightTree::wait(std::chrono::milliseconds ms) {
     std::this_thread::sleep_for(ms);
 }
-
-
 
 // ---- Sportsman tree: ambers count down 0.5s apart ----
 void LightTree::runSportsmanTree() {

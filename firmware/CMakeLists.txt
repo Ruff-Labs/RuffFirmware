@@ -21,6 +21,7 @@ add_executable(firmware
     src/database/SupabaseSync.cpp
     src/light_tree/LightTree.cpp
     src/remote/Remote.cpp
+    src/remote/VirtualRemote.cpp
     src/sensors/SensorEvents.cpp
     src/state_machine/state_machine.cpp
     src/timer/Timer.cpp

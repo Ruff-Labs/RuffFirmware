@@ -1,108 +1,158 @@
-// Timer.cpp  —  race clock: start (green) → splits → end, plus foul (false start)
+// Timer.cpp  —  race clock (see Timer.hpp)
 //
-// Steps:
-//   1. now_ns(): one shared monotonic clock
-//   2. start():  record green time
-//   3. split():  per-dog pass times
-//   4. end():    lane finish time
-//   5. foul():   false start, negative reaction time
-//   6. reset():  clear everything
-//   7. readouts: elapsed_ms() for the live GUI, race_ms() for results
-//   8. wire into state_machine.cpp (replace RaceData timing fields)
+// The Timer code itself is done. Left to finish (search "TODO"):
+//   [ ] 2. warmup clock: needs a remote button 3 + a GUI button, or delete Countdown   (TODO 2)
+//   [ ] 4. SensorEvents: report which pass was early, and confirm which
+//          pin is sensor #1 vs #2 (FORWARD / BACK)                                     (TODO 4)
+//   [ ] 5. Database.cpp: save start_ms + early_pass, write RACE_DNF as DNF             (TODO 5)
+//   [ ] 6. ask: is "4 or more exchanges" = 4 splits per lane?    (Timer.hpp, MIN_EXCHANGES)
+//   [ ] 7. test on the BeaglePlay with real sensors
 #include "timer/Timer.hpp"
+#include "sensors/SensorEvents.hpp"
+#include <algorithm>
 #include <ctime>
 
-// ---------- settings ----------
-// TODO(5): add any timing rules here, e.g. a reaction-time window for fouls
-// constexpr uint64_t FOUL_WINDOW_NS = ...;
+constexpr uint64_t MINUTE_NS   = 60'000'000'000ull;
+constexpr uint64_t ARM_WAIT_NS = 3'000'000'000ull;   // countdown starts 3 s after the last press
 
-static double ns_to_ms(int64_t ns) { return ns / 1e6; }   // same as ms() in SensorEvents.cpp
+static double ns_to_ms(int64_t ns) { return ns / 1e6; }
 
-// ---------- 1. clock ----------
+static bool valid_lane(int lane) { return lane >= 0 && lane < NUM_LANES; }
+
+// ---------- clock ----------
 uint64_t Timer::now_ns() {
-    // TODO(1): read CLOCK_MONOTONIC so it matches gpiod event timestamps
-    //   timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    //   return uint64_t(ts.tv_sec) * 1'000'000'000ull + ts.tv_nsec;
-    return 0;
+    timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return uint64_t(ts.tv_sec) * 1'000'000'000ull + ts.tv_nsec;
 }
 
-// ---------- 2. start ----------
+// ---------- green ----------
+// The state machine knows the sequence lengths (SEQUENCE[] in state_machine.cpp),
+// so it passes the absolute time green is due: sequence start + sum of the step durations.
+void Timer::set_expected_green(uint64_t t_ns) {
+    t_expected_green_ = t_ns;
+}
+
 void Timer::start(uint64_t t_green_ns) {
-    // TODO(2): call from Sequence → Running in race_tick(), where m.data.t_green is set now
-    //   t_green_    = t_green_ns;
-    //   wall_start_ = std::chrono::system_clock::now();   // StartTime column in the CSV
-    //   running_    = true;
-    //   for each lane not already FalseStart: status = Running
-    (void)t_green_ns;
+    t_green_    = t_green_ns;
+    t_stop_     = 0;
+    wall_start_ = std::chrono::system_clock::now();   // StartTime column in the CSV
+    running_    = true;
+    for (LaneTime& L : lanes_) {
+        L.status = LaneStatus::Running;   // a false start no longer takes a lane out of the heat
+        // a start trigger before green was measured against the expected green; redo it against the real one
+        if (L.has_start) L.start_ms = ns_to_ms(int64_t(L.t_start - t_green_));
+    }
 }
 
-// ---------- 3. split ----------
-void Timer::split(int lane, uint64_t t_ns) {
-    // TODO(3): call once per try_pair() result for that lane (SensorEvents.cpp)
-    //   ignore if !running_ or lane isn't Running, or n_splits == MAX_DOGS
-    //   decide what a split means:
-    //     time since green?       ns_to_ms(t_ns - t_green_)
-    //     time since last split?  ns_to_ms(t_ns - previous split)
-    //   (the old Python summed splits to get RaceTime, so that one used "since last")
-    //   LaneTime& L = lanes_[lane];
-    //   L.splits_ms[L.n_splits++] = ...;
-    (void)lane; (void)t_ns;
+// ---------- start time ----------
+// Only the start dog's FIRST #1 trigger counts; it's not a split.
+void Timer::start_time(int lane, uint64_t t_ns) {
+    if (!valid_lane(lane)) return;
+    LaneTime& L = lanes_[lane];
+    if (L.has_start) return;
+
+    uint64_t green = t_green_ ? t_green_ : t_expected_green_;
+    if (!green) return;   // no sequence running, nothing to measure against
+
+    L.has_start = true;
+    L.t_start   = t_ns;
+    L.start_ms  = ns_to_ms(int64_t(t_ns - green));   // negative = early / false start
 }
 
-// ---------- 4. end ----------
-void Timer::end(int lane, uint64_t t_ns) {
-    // TODO(4): ignore if this lane is already Finished/FalseStart (prevents double finish)
-    //   lanes_[lane].t_finish = t_ns;
-    //   lanes_[lane].status   = LaneStatus::Finished;
-    //   if no lane is still Running: running_ = false
-    // TODO(4): use the gpiod event timestamp (Gate.t_enter), not now_ns(), for sub-ms accuracy
-    (void)lane; (void)t_ns;
+// ---------- split ----------
+// TODO 4: `early` has to come from SensorEvents: incoming dog hit #1 before the returning
+//         dog hit #2 (still gets a time, but red LED 2 s on that lane)
+void Timer::split(int lane, uint64_t t_ns, bool early) {
+    if (!running_ || !valid_lane(lane)) return;
+    LaneTime& L = lanes_[lane];
+    if (L.status != LaneStatus::Running || L.n_splits == MAX_DOGS) return;
+    if (t_ns <= t_green_) return;   // latched before green
+    if (L.has_start && t_ns - L.t_start < START_LOCKOUT_NS) return;   // still the start dog
+
+    L.splits_ms[L.n_splits]  = ns_to_ms(int64_t(t_ns - t_green_));   // since green, not since last split
+    L.early_pass[L.n_splits] = early;
+    L.n_splits++;
+    L.t_last = t_ns;
 }
 
-// ---------- 5. foul ----------
-void Timer::foul(int lane, uint64_t t_ns) {
-    // TODO(5): called from the Sequence state when beam_broken[lane] goes true before green
-    //   problem: green hasn't happened yet, so t_green_ is 0
-    //   option: pass the *expected* green time (sequence start + sum of SEQUENCE durations)
-    //   lanes_[lane].foul_ms = ns_to_ms(int64_t(t_ns) - int64_t(expected_green));   // negative
-    //   lanes_[lane].status  = LaneStatus::FalseStart;
-    // TODO(5): this is the number isFault() in SensorEvents.cpp wants to display
-    (void)lane; (void)t_ns;
+// ---------- stop ----------
+// Remote button 2. t_ns is the button press; each lane's final time is its last #1 trigger, not the press.
+void Timer::stop(uint64_t t_ns) {
+    if (!running_) return;
+    running_ = false;
+    t_stop_  = t_ns;
+    for (LaneTime& L : lanes_) {
+        if (L.n_splits >= MIN_EXCHANGES) {
+            L.status   = LaneStatus::Finished;
+            L.t_finish = L.t_last;
+        } else {
+            L.status = LaneStatus::DNF;
+        }
+    }
 }
 
-// ---------- 6. reset ----------
+// ---------- reset ----------
+// "Reset Heat": clears the clock and lane times only. False start lights/counts live outside
+// the Timer (RaceData) and are only cleared by "Reset Race" (spec 3.F).
 void Timer::reset() {
-    running_    = false;
-    t_green_    = 0;
-    wall_start_ = {};
-    lanes_      = {};
+    running_          = false;
+    t_expected_green_ = 0;
+    t_green_          = 0;
+    t_stop_           = 0;
+    wall_start_       = {};
+    lanes_            = {};
 }
 
-// ---------- 7. readouts ----------
+// ---------- readouts ----------
+// Live stopwatch for the GUI RaceScreen:
+//   countdown → negative, counting to green
+//   running   → time since green
+//   stopped   → frozen at the remote button 2 press
 double Timer::elapsed_ms(uint64_t now) const {
-    // TODO(7): live stopwatch for the GUI RaceScreen (replaces its UI-only QML Timer)
-    if (!running_) return 0;
-    return ns_to_ms(now - t_green_);
-    (void)now;
+    if (running_) return ns_to_ms(int64_t(now - t_green_));
+    if (t_stop_)  return ns_to_ms(int64_t(t_stop_ - t_green_));
+    if (t_expected_green_) return std::min(0.0, ns_to_ms(int64_t(now - t_expected_green_)));
     return 0.0;
 }
 
+// TODO 5: Database.cpp has to write RACE_DNF as "DNF", and also save start_ms and early_pass
 double Timer::race_ms(int lane) const {
-    // TODO(7): final time; only valid when status == Finished
-    //   return ns_to_ms(lanes_[lane].t_finish - t_green_);
-    // TODO(7): decide what DNF / FalseStart return (e.g. -1 or NaN) and keep it consistent with Database
-    (void)lane;
-    (void)ns_to_ms;   // TODO: remove once used
-    return 0.0;
+    if (!valid_lane(lane)) return RACE_DNF;
+    const LaneTime& L = lanes_[lane];
+    if (L.status != LaneStatus::Finished) return RACE_DNF;
+    return L.splits_ms[L.n_splits - 1];   // green → last dog through #1
 }
 
-// ---------- 8. wire-up (do this in state_machine.cpp later) ----------
-// TODO(8):
-//   - replace RaceData::t_green / t_finish / finished / false_start with a Timer
-//   - Sequence → Running:    timer.start(Timer::now_ns());
-//   - Sequence beam break:   timer.foul(lane, t);
-//   - Running lane_done:     timer.end(lane, gate_t_enter);
-//   - each try_pair():       timer.split(lane, t);
-//   - Reset:                 timer.reset();
-//   - pick_winner(): compare timer.lane(l).status / race_ms(l)
-//   - steady_clock::now() there is the same clock as now_ns(), so the two can be mixed during the switch
+// ---------- warmup / break countdown ----------
+// TODO 2: needs a remote button (Lee's button 3) and a GUI button for breaks/lunch.
+//         Delete this class if the warmup clock isn't wanted.
+// No tick needed: everything is worked out from t_begin_ when it's read.
+void Countdown::press(uint64_t now) {
+    if (counting(now)) { stop(); return; }   // press while counting = stop
+    if (!armed_ || remaining_ms(now) <= 0) total_ = 0;   // fresh start (idle, or the last one ran out)
+    armed_   = true;
+    total_  += MINUTE_NS;
+    t_begin_ = now + ARM_WAIT_NS;            // every press pushes the start back 3 s
+}
+
+void Countdown::start(uint64_t now, uint64_t total_ns) {
+    armed_   = true;
+    total_   = total_ns;
+    t_begin_ = now;
+}
+
+void Countdown::stop() {
+    armed_ = false;
+    total_ = 0;
+}
+
+bool Countdown::counting(uint64_t now) const {
+    return armed_ && now >= t_begin_ && remaining_ms(now) > 0;
+}
+
+double Countdown::remaining_ms(uint64_t now) const {
+    if (!armed_) return 0.0;
+    if (now < t_begin_) return ns_to_ms(int64_t(total_));   // still taking presses
+    uint64_t done = now - t_begin_;
+    return done >= total_ ? 0.0 : ns_to_ms(int64_t(total_ - done));
+}

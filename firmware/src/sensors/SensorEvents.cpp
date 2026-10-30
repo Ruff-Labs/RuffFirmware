@@ -3,8 +3,8 @@
 #include <chrono>
 
 // ---------- settings ----------
-// glitch filter off for now: signals come in as clean 1/0
-// constexpr uint64_t REARM_NS = 50'000'000;   // 50 ms: a rise this soon after the last fall = same event (glitch)
+// TODO: no glitch filter, the signals come in as clean 1/0. If they bounce on hardware, ignore
+//       a rise that comes within ~50 ms of the last fall on the same pin.
 
 // run gpioinfo on the beagle to find the offsets, e.g.
 //         line  26:      "P8_14"       unused   input  active-high
@@ -54,30 +54,32 @@ Sensors::Sensors(const std::string& chipPath)
 
 // ---------- pass logic ----------
 // edges are handled in the order they happened, so FORWARD -> BACK inside one poll still works
-// ASSUMED (not yet checked on hardware): a dog crossing goes ALIGN -> FORWARD -> BACK -> ALIGN,
+// TODO: ASSUMED (not yet checked on hardware): a dog crossing goes ALIGN -> FORWARD -> BACK -> ALIGN,
 // with ALIGN dropping while the beam is broken. Verify with gpiomon once the sensors are wired.
 static void track_pass(LaneSignals& ln, Signal sig, uint64_t t) {
     switch (sig) {
-      case ALIGN:                       // beam back on the reflector = lane ready; doesn't touch the pass
-        break;                          // (it comes back right after a dog clears the beam)
-      case FORWARD:
-        if (!ln.forward_armed) {        // keep the first break if FORWARD bounces
-            ln.forward_armed = true;
-            ln.t_pass        = t;
-        }
-        break;
-      case BACK:
-        if (ln.forward_armed) ln.passed = true;   // FORWARD then BACK = valid pass
-        // BACK without FORWARD first = wrong direction, ignored
-        ln.forward_armed = false;
-        break;
+        case ALIGN:                       // beam back on the reflector = lane ready; doesn't touch the pass
+            break;                          // (it comes back right after a dog clears the beam)
+        case FORWARD:
+            if (!ln.forward_armed) {        // keep the first break if FORWARD bounces
+                ln.forward_armed = true;
+                ln.t_pass = t;
+            }
+            break;
+        case BACK:
+            if (ln.forward_armed) ln.passed = true;   // FORWARD then BACK = valid pass
+            // BACK without FORWARD first = wrong direction, ignored
+            ln.forward_armed = false;
+            break;
     }
 }
 
 // ---------- non-blocking read ----------
 void Sensors::poll() {
-    for (auto& ln : lanes_)
+    for (auto& ln : lanes_) {
         for (bool& r : ln.rose) r = false;
+        ln.passed = false;   // one-shot like rose[], so every pass shows up exactly once
+    }
 
     // timeout 0 = just check, never sleep. Timestamps come from the kernel at the
     // moment of the edge, so reading them a tick late doesn't hurt accuracy.
@@ -91,12 +93,9 @@ void Sensors::poll() {
 
             ln.high[pin.sig] = rising;
             if (rising) {
-                // bool glitch = ln.t_fall[pin.sig] && (t - ln.t_fall[pin.sig] < REARM_NS);
-                // if (!glitch) {
-                    ln.t_rise[pin.sig] = t;
-                    ln.rose[pin.sig]   = true;
-                    track_pass(ln, pin.sig, t);
-                // }
+                ln.t_rise[pin.sig] = t;
+                ln.rose[pin.sig]   = true;
+                track_pass(ln, pin.sig, t);
             } else {
                 ln.t_fall[pin.sig] = t;
             }

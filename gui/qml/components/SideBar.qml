@@ -21,6 +21,7 @@ Rectangle {
         { route: "setup",    label: "Setup",    accent: Theme.accent },
         { route: "sensor",   label: "Sensors",  accent: Theme.success },
         { route: "race",     label: "Race",     accent: Theme.warning },
+        { route: "remote",   label: "Remote",   accent: Theme.danger },   // virtual judge remote (testing)
         { route: "settings", label: "Settings", accent: Theme.textMuted }
     ]
     readonly property int activeIndex: {

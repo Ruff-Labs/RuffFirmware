@@ -18,6 +18,7 @@
 
         <file alias="MainScreen.qml">qml/screens/MainScreen.qml</file>
         <file alias="RaceScreen.qml">qml/screens/RaceScreen.qml</file>
+        <file alias="RemoteScreen.qml">qml/screens/RemoteScreen.qml</file>
         <file alias="SensorScreen.qml">qml/screens/SensorScreen.qml</file>
         <file alias="SettingsScreen.qml">qml/screens/SettingsScreen.qml</file>
         <file alias="SetupScreen.qml">qml/screens/SetupScreen.qml</file>

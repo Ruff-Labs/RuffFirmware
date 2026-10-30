@@ -1,13 +1,17 @@
 #pragma once
-// 2 lanes x 3 active-high signals (BACK / FORWARD / ALIGN), read without a thread.
+// Beam sensors: 2 lanes x 3 active-high signals (BACK / FORWARD / ALIGN), read without a thread.
 // poll() never blocks: call it once per state machine tick.
+//   ALIGN    high = beam reflecting across the lane, lane ready
+//   FORWARD  then BACK = one valid pass (a dog crossing in the right direction)
+// Edge times are kernel timestamps (CLOCK_MONOTONIC ns), so reading them a tick late doesn't hurt accuracy.
+// Pin numbers are LANE_PINS in SensorEvents.cpp.
 #include <gpiod.hpp>
 #include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 
-constexpr int NUM_LANES   = 2;
+constexpr int NUM_LANES   = 2;  // matches Lane { LEFT = 0, RIGHT = 1 } in state_machine.cpp; Timer.hpp uses this one too
 constexpr int NUM_SIGNALS = 3;
 
 enum Signal {
@@ -25,8 +29,9 @@ struct LaneSignals {
 
     // pass detection: FORWARD must break before BACK to count
     bool     forward_armed = false;     // FORWARD broke, waiting on BACK
-    bool     passed        = false;     // valid pass seen (latched until reset())
-    uint64_t t_pass        = 0;         // when FORWARD broke for that pass
+    bool     passed        = false;     // valid pass seen during the last poll() (one-shot, cleared every poll
+                                        // so every dog's pass shows up once and becomes a Timer split)
+    uint64_t t_pass        = 0;         // when FORWARD broke for the latest pass
 };
 
 class Sensors {

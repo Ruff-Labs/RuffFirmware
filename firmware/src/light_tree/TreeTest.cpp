@@ -2,16 +2,10 @@
 #include <iostream>
 #include <string>
 
-//1. install dev package
-//sudo apt install libgpiod-dev
-
-//make sure your in the file folder
-// g++ -std=c++17 -Wall -o tree TreeTest.cpp LightTree.cpp -lgpiodcxx
-
-// sudo ./tree test        # test each light one by one
-// sudo ./tree sportsman   # run sportsman sequence
-// sudo ./tree pro         # run pro sequence
-
+// Light tree test program, built as build/firmware/tree_test (stop the firmware service first):
+//   sudo ./build/firmware/tree_test test        # each light one by one
+//   sudo ./build/firmware/tree_test sportsman   # sportsman sequence
+//   sudo ./build/firmware/tree_test pro         # pro sequence
 
 int main(int argc, char* argv[]) {
     try {

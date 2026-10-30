@@ -16,6 +16,7 @@ SideNavItem 1.0 SideNavItem.qml
 # Screens
 MainScreen 1.0 MainScreen.qml
 RaceScreen 1.0 RaceScreen.qml
+RemoteScreen 1.0 RemoteScreen.qml
 SensorScreen 1.0 SensorScreen.qml
 SettingsScreen 1.0 SettingsScreen.qml
 SetupScreen 1.0 SetupScreen.qml

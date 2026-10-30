@@ -1,12 +1,9 @@
-// Remote.cpp  —  judge remote (RF receiver) → READY / START / RESET / ABORT
+// Remote.cpp  —  judge remote (see Remote.hpp)
 //
-// WHAT'S LEFT TO FILL IN (top to bottom, in this order):
-//   TODO 1  settings      chip, active level, pin numbers         <- needs the receiver in hand
-//   TODO 2  on_press()    what each button does                    <- one line per button
-//   TODO 3  decisions     RESET in Idle? 3 or 4 buttons?           <- rules questions
-//
-// Already done: GPIO setup, reading presses without blocking, debounce, hookup in state_machine.cpp.
-// Until TODO 1 is filled in, begin() fails and the remote just reports "nothing pressed".
+// Left to do:
+//   TODO 1  settings    chip, active level, pin numbers               <- needs the receiver in hand
+//   TODO 3  decisions   RESET in Idle? which buttons on a 4-button remote?  <- rules questions
+// Until TODO 1 is filled in, the GPIO part of begin() fails and only the GUI's virtual remote works.
 #include "remote/Remote.hpp"
 #include <chrono>
 #include <cstdio>
@@ -18,11 +15,13 @@ using namespace std::chrono_literals;
 //   - if the receiver outputs 5 V, level-shift to 3.3 V before the BeagleBone pin!
 //   - pins must not collide with LANE_PINS in SensorEvents.cpp
 // ============================================================
-constexpr const char* REMOTE_CHIP       = "/dev/gpiochip?";   // which chip the pins are on CHECK THIS 
+constexpr const char* REMOTE_CHIP       = "/dev/gpiochip?";   // which chip the pins are on
 constexpr bool        REMOTE_ACTIVE_LOW = false;              // most RF receivers are active-high (1 = pressed)
 
 constexpr unsigned PIN_READY = 0;   // receiver D0 -> P9_?? -> line ?
 constexpr unsigned PIN_START = 0;   // receiver D1 -> P9_?? -> line ?
+constexpr unsigned PIN_STOP  = 0;   // receiver D? -> P9_?? -> line ?   stops the race clock (Lee's button 2).
+                                    // TODO 3c: if the remote has no spare button, share one with START/RESET
 constexpr unsigned PIN_RESET = 0;   // receiver D2 -> P9_?? -> line ?
 constexpr unsigned PIN_ABORT = 0;   // receiver D3 -> P9_?? -> line ?   (see TODO 3b)
 
@@ -32,9 +31,12 @@ constexpr uint64_t REMOTE_LOCKOUT_NS = 250'000'000;    // 250 ms: ignore re-pres
 
 // ---------- setup ----------
 bool Remote::begin() {
+    virtual_.begin();   // GUI buttons work even while the receiver isn't set up (TODO 1)
+
     buttons_ = {{
         { PIN_READY, RemoteCmd::Ready },
         { PIN_START, RemoteCmd::Start },
+        { PIN_STOP,  RemoteCmd::Stop  },
         { PIN_RESET, RemoteCmd::Reset },
         { PIN_ABORT, RemoteCmd::Abort },
     }};
@@ -43,6 +45,8 @@ bool Remote::begin() {
         gpiod::line_settings settings;
         settings.set_direction(gpiod::line::direction::INPUT)
                 .set_edge_detection(gpiod::line::edge::BOTH)   // press AND release
+                .set_event_clock(gpiod::line::clock::MONOTONIC) // same clock as the sensors, so the STOP press
+                                                                 // timestamp can go straight into Timer::stop()
                 .set_bias(REMOTE_ACTIVE_LOW ? gpiod::line::bias::PULL_UP
                                             : gpiod::line::bias::PULL_DOWN)
                 .set_debounce_period(REMOTE_DEBOUNCE);
@@ -79,6 +83,11 @@ RemoteInputs Remote::poll() {
         }
     }
 
+    // GUI presses: no debounce/lockout needed, one packet = one press
+    RemoteCmd cmd;
+    uint64_t  t;
+    while (virtual_.next(cmd, t)) apply(cmd, t, out);
+
     out.judge_ready = ready_latched_;   // READY is a level, re-sent every tick
     return out;
 }
@@ -89,41 +98,37 @@ void Remote::on_press(Button& b, uint64_t t_ns, RemoteInputs& out) {
     b.down = true;
     if (t_ns - b.t_last_ns < REMOTE_LOCKOUT_NS) return;  // RF chatter
     b.t_last_ns = t_ns;
+    apply(b.cmd, t_ns, out);
+}
 
-    // ============================================================
-    // TODO 2: what each button does (one line each)
-    //   the state machine reads these from RaceInputs:
-    //     ready_latched_     -> judge_ready    (must STAY on, Ready drops to Idle if it goes false)
-    //     out.start_pressed  -> start_pressed  (only matters in Ready)
-    //     out.judge_ack      -> judge_ack      (clears the Finished screen early)
-    //     out.abort          -> abort          (sends any race state to Reset)
-    // ============================================================
-    switch (b.cmd) {
+// ---------- what each button does (real RF buttons and the GUI's virtual remote) ----------
+void Remote::apply(RemoteCmd cmd, uint64_t t_ns, RemoteInputs& out) {
+    switch (cmd) {
       case RemoteCmd::Ready:
-        // TODO 2: toggle ready_latched_ on/off
-        ready_latched_ = false; // not sure if this is right
+        ready_latched_ = !ready_latched_;   // toggle: 1st press = ready, 2nd press = not ready
         break;
 
       case RemoteCmd::Start:
         out.start_pressed = true;
         break;
 
-      case RemoteCmd::Reset:
-        out.judge_ack = true;
+      case RemoteCmd::Stop:
+        out.stop_pressed = true;   // only matters in Running
+        out.t_stop_ns    = t_ns;   // the press time, not the tick time
+        break;
 
+      case RemoteCmd::Reset:
+        out.judge_ack = true;   // clears the Finished screen early
         // TODO 3a: should RESET while in Idle/Ready also clear ready_latched_?
-        // TODO: figure out if this the case
         break;
 
       case RemoteCmd::Abort:
-        // TODO 2: set out.abort
-        out.abort = true;
+        out.abort = true;   // any race state -> Reset
         break;
 
-    //   default:
-    //     break;
+      case RemoteCmd::None:
+        break;
     }
-    (void)out;   // remove once TODO 2 is filled in
 }
 
 // ---------- release ----------
@@ -146,5 +151,5 @@ Remote::Button* Remote::find(unsigned line) {
     return nullptr;
 }
 
-// Bench test idea: a tiny main() that loops remote.poll() and prints each command.
-// Check exactly one event per press (fast taps, long hold, far range).
+// TODO: bench test once the receiver is wired: loop remote.poll() and print each command.
+//       Check exactly one event per press (fast taps, long hold, far range).

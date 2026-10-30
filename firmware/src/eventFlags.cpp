@@ -1,24 +1,16 @@
+// TODO: event flags shared between modules. Nothing uses these yet (the state machine reads
+//       RaceInputs in state_machine.cpp), so fill them in or delete this file.
 
-
-//
-
-// if false start or early start red light turns on for 2 seconds
-//
+// light tree: red light on for 2 s after a false start or early start
 struct TreeLightFlag {
     bool green_on;
     bool false_start;
-
 };
 
-// false start indicated
-// early start indicated
-//
-struct SensorEventFlag{
-
+// sensors: false start / early start seen
+struct SensorEventFlag {
 };
 
-
-// when there is a false start
+// timer: false start
 struct TimerFlag {
 };
-
