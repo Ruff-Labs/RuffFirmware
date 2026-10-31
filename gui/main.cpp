@@ -2,10 +2,13 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
-#include "backend/virtual_remote.h"
+#include "backend/virtual_remote.hpp"
+#include "backend/backend.hpp"
 
 int main(int argc, char *argv[])
 {
+    Backend backend;
+    setContextProperty("backend", &backend);
     QGuiApplication app(argc, argv);
 
     // "Basic" is the most customizable Controls style, so your Figma

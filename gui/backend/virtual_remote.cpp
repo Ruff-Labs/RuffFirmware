@@ -1,4 +1,4 @@
-#include "virtual_remote.h"
+#include "virtual_remote.hpp"
 #include <common/protocol.h>
 #include <QDebug>
 #include <QTime>
