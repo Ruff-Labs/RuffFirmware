@@ -2,36 +2,20 @@ import QtQuick
 import QtQuick.Layouts
 import BoardGui
 
-// Live timing. The Timer here is a UI-only stopwatch so you can see it work;
-// real timing should come from the board (hardware timestamps) via C++.
+// Live timing from the firmware (backend, see gui/backend/backend.hpp).
+// The buttons send judge remote commands, same as the Remote screen.
 Item {
     id: root
     property string title: "Race"
     property string subtitle: "Live timing"   // shown under the title in PageHeader
 
-    property bool running: false
-    property int elapsedMs: 0
-    property double startedAt: 0
-    property int lane1Ms: -1
-    property int lane2Ms: -1
+    readonly property bool running: backend.connected && backend.raceState === "Running"
 
+    // ms -> "12.345"; negative (countdown to green) -> "-2.345"
     function formatTime(ms) {
-        if (ms < 0) return "--.---"
-        const s = Math.floor(ms / 1000)
-        const rem = ms % 1000
-        return s + "." + ("00" + rem).slice(-3)
-    }
-    function start() {
-        lane1Ms = -1; lane2Ms = -1
-        startedAt = Date.now() - elapsedMs
-        running = true
-    }
-    function stop()  { running = false }
-    function reset() { running = false; elapsedMs = 0; lane1Ms = -1; lane2Ms = -1 }
-
-    Timer {
-        interval: 16; repeat: true; running: root.running
-        onTriggered: root.elapsedMs = Date.now() - root.startedAt
+        const t = Math.round(ms)
+        const a = Math.abs(t)
+        return (t < 0 ? "-" : "") + Math.floor(a / 1000) + "." + ("00" + (a % 1000)).slice(-3)
     }
 
     ColumnLayout {
@@ -42,11 +26,17 @@ Item {
         // Big clock
         Text {
             Layout.alignment: Qt.AlignHCenter
-            text: root.formatTime(root.elapsedMs)
+            text: backend.connected ? root.formatTime(backend.clockMs) : "--.---"
             color: root.running ? Theme.textPrimary : Theme.textMuted
             font.pixelSize: Theme.fontDisplay
             font.bold: true
             font.family: "monospace"
+        }
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            text: backend.connected ? backend.raceState : "Firmware not running"
+            color: backend.connected ? Theme.textMuted : Theme.danger
+            font.pixelSize: Theme.fontSmall
         }
 
         // Lane results
@@ -57,43 +47,64 @@ Item {
 
             Repeater {
                 model: [
-                    { name: "Lane 1", ms: root.lane1Ms, color: Theme.accent },
-                    { name: "Lane 2", ms: root.lane2Ms, color: Theme.warning }
+                    { name: "Lane 1", lane: 0, color: Theme.accent },
+                    { name: "Lane 2", lane: 1, color: Theme.warning }
                 ]
                 delegate: Card {
                     required property var modelData
+                    readonly property bool won: backend.winner === modelData.lane
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    border.color: won ? Theme.success : Theme.borderSubtle
+
                     ColumnLayout {
                         anchors.fill: parent
-                        SectionLabel { text: modelData.name; color: modelData.color }
+                        SectionLabel {
+                            text: modelData.name + (won ? "  ·  winner" : "")
+                            color: won ? Theme.success : modelData.color
+                        }
                         Item { Layout.fillHeight: true }
                         Text {
-                            text: root.formatTime(modelData.ms)
+                            text: backend.raceTimes[modelData.lane]   // "--.---", "12.345" or "DNF"
                             color: Theme.textPrimary
                             font.pixelSize: Theme.fontTitle + 10
                             font.family: "monospace"
+                        }
+                        Text {
+                            visible: backend.connected
+                            text: "splits " + backend.splits[modelData.lane]
+                                  + "  ·  false starts " + backend.falseStarts[modelData.lane]
+                            color: backend.falseStarts[modelData.lane] > 0 ? Theme.danger : Theme.textMuted
+                            font.pixelSize: Theme.fontSmall
                         }
                     }
                 }
             }
         }
 
-        // Controls
+        // Controls: judge remote commands
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacingMd
             AppButton {
                 Layout.fillWidth: true
-                text: root.running ? "Stop" : "Start"
-                variant: root.running ? "danger" : "success"
-                onClicked: root.running ? root.stop() : root.start()
+                text: "Start"
+                variant: "success"
+                enabled: backend.connected && !root.running
+                onClicked: virtualRemote.press("start")
+            }
+            AppButton {
+                Layout.fillWidth: true
+                text: "Stop"
+                variant: "danger"
+                enabled: root.running
+                onClicked: virtualRemote.press("stop")
             }
             AppButton {
                 Layout.fillWidth: true
                 text: "Reset"
-                enabled: !root.running
-                onClicked: root.reset()
+                enabled: backend.connected && !root.running
+                onClicked: virtualRemote.press("reset")
             }
         }
     }

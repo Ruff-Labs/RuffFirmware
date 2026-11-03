@@ -3,16 +3,16 @@
 using namespace std::chrono_literals;
 using Clock = std::chrono::steady_clock;   // same clock (CLOCK_MONOTONIC) gpiod uses for edge timestamps
 
-enum class RaceState {
-    Idle,
-    Ready,
-    Sequence,
-    Running,
-    FalseStart,
-    Finished,
-    Reset,       // "Reset Heat": clears the clock/times, KEEPS false start counts + red lights
-    ResetRace    // "Reset Race": clears everything, including false starts and red lights
-};
+// enum class RaceState {
+//     Idle,
+//     Ready,
+//     Sequence,
+//     Running,
+//     FalseStart,
+//     Finished,
+//     Reset,       // "Reset Heat": clears the clock/times, KEEPS false start counts + red lights
+//     ResetRace    // "Reset Race": clears everything, including false starts and red lights
+// };
 
 enum Lane { LEFT = 0, RIGHT = 1 };
 

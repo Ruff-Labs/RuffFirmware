@@ -4,17 +4,28 @@ import BoardGui
 
 // Sensor/gate status. The ListModel is placeholder data — replace it with a
 // C++ model (QAbstractListModel) that updates from the board's hardware.
+
+//NOTE: right now forward and backward are pushed to beam status in general.
 Item {
     id: root
     property string title: "Sensors"
     property string subtitle: "Live gate status"   // shown under the title in PageHeader
 
+    // ListModel {
+    //     id: sensorModel
+    //     ListElement { name: "Forward";  lane: "Lane 1"; status: "ok";      reading: "Clear" }
+    //     ListElement { name: "Back"; lane: "Lane 1"; status: "ok";      reading: "Clear" }
+    //     ListElement { name: "Forward";  lane: "Lane 2"; status: "warning"; reading: "Weak signal" }
+    //     ListElement { name: "Back"; lane: "Lane 2"; status: "error";   reading: "Not detected" }
+    // }
+
+
     ListModel {
         id: sensorModel
-        ListElement { name: "Start Gate";  lane: "Lane 1"; status: "ok";      reading: "Clear" }
-        ListElement { name: "Finish Gate"; lane: "Lane 1"; status: "ok";      reading: "Clear" }
-        ListElement { name: "Start Gate";  lane: "Lane 2"; status: "warning"; reading: "Weak signal" }
-        ListElement { name: "Finish Gate"; lane: "Lane 2"; status: "error";   reading: "Not detected" }
+        ListElement { name: "Alignment"; lane: "Lane 1"; status: backend.aligned[0] ? "ok" : "error"; reading: backend.aligned[0] ? "Aligned" : "Not aligned" }
+        ListElement { name: "Beam"; lane: "Lane 1"; status: backend.beamBroken[0] ? "ok" : "error"; reading: backend.beamBroken[0] ? "Broken" : "Clear" }
+        ListElement { name: "Alignment"; lane: "Lane 2"; status: backend.aligned[1] ? "ok" : "error"; reading: backend.aligned[1] ? "Aligned" : "Not aligned" }
+        ListElement { name: "Beam"; lane: "Lane 2"; status: backend.beamBroken[1] ? "ok" : "error"; reading: backend.beamBroken[1] ? "Broken" : "Clear" }
     }
 
     function statusColor(s) {
@@ -26,6 +37,7 @@ Item {
         anchors.margins: Theme.spacingLg
         spacing: Theme.spacingMd
 
+        // TODO: actually check and see if this is needed later on. (low key might just be a reset or refresh)
         RowLayout {
             Layout.fillWidth: true
             SectionLabel { text: "Gate status"; Layout.fillWidth: true }

@@ -10,6 +10,8 @@ qt_add_executable(gui
     main.cpp
     backend/virtual_remote.cpp
     backend/virtual_remote.hpp
+    backend/backend.cpp
+    backend/backend.hpp
     resources.qrc
 )
 

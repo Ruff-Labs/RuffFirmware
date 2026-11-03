@@ -83,7 +83,7 @@ Item {
                 }
             }
         }
-        // TODO: this is all fake data this need to be live at one point 
+        // TODO: this is all fake data this need to be live at one point
         // ---- Status tiles ----
         RowLayout {
             Layout.fillWidth: true
@@ -98,14 +98,16 @@ Item {
                 accentColor: Theme.success
                 onClicked: root.openScreen("sensor")
             }
+
             NavTile {
                 Layout.fillWidth: true; Layout.fillHeight: true
-                value: "--.---"
+                value: backend.raceTimes
                 label: "Race"
                 subtitle: "Last result"
                 accentColor: Theme.warning
                 onClicked: root.openScreen("race")
             }
+
             NavTile {
                 Layout.fillWidth: true; Layout.fillHeight: true
                 value: "80%"

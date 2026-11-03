@@ -16,6 +16,16 @@ struct RaceStatus {
     int8_t  winner;           // -1 = none
 };
 
+enum class RaceState {
+    Idle,
+    Ready,
+    Sequence,
+    Running,
+    FalseStart,
+    Finished,
+    Reset,       // "Reset Heat": clears the clock/times, KEEPS false start counts + red lights
+    ResetRace    // "Reset Race": clears everything, including false starts and red lights
+};
 
 
 
