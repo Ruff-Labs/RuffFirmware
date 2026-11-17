@@ -2,7 +2,7 @@
 #include "light_tree/LightTree.hpp"
 #include "remote/Remote.hpp"
 #include "sensors/SensorEvents.hpp"
-#include "protocol.h"
+#include <common/protocol.h>
 #include "timer/Timer.hpp"
 #include <chrono>
 #include <cstdio>
