@@ -16,11 +16,6 @@ Everything builds from the **top-level** `CMakeLists.txt`. On Mac/Windows CMake 
 
 ---
 
-
-BEAGLE BOARD CRED CHANGE LATER FOR NOW ITS
-user_name = debian
-user_pass = rufflab
-
 ## Running the GUI on a Mac
 
 Requires Qt **6.5 or newer** and CMake.
@@ -78,15 +73,15 @@ If the window never appears, run it from the prompt and read the QML error it pr
 Requires **Debian 13 (trixie) or newer** on the board. The code uses the libgpiod v2 C++ API and
 Qt ≥ 6.5, and older Debian images don't have them.
 
-> The systemd services expect the repo at **`/home/debian/project`**. Clone it there or the
-> services won't find the binaries.
+> Clone the repo anywhere (e.g. `~/RuffFirmware`). `setup.sh` and `update.sh` point the systemd
+> services at wherever it is. If you move the clone, re-run `./scripts/update.sh` from the new spot.
 
 ### First-time setup
 
 ```bash
 ssh debian@<board-ip>
-git clone https://github.com/Ruff-Labs/<this-repo>.git /home/debian/project
-cd /home/debian/project
+git clone https://github.com/Ruff-Labs/<this-repo>.git ~/RuffFirmware
+cd ~/RuffFirmware
 ./scripts/setup.sh
 ```
 
@@ -95,6 +90,7 @@ cd /home/debian/project
 2. creates an empty `/etc/ruff/firmware.env` (Supabase settings, see below)
 3. builds into `build/` (`scripts/build.sh`)
 4. installs `systemd/*.service` and starts **firmware** and **gui**, which also start on every boot
+   (the GUI comes up right away; it doesn't wait for WiFi or the firmware)
 
 ### Supabase upload (optional)
 
@@ -110,7 +106,7 @@ See [docs/supabase-schema.md](docs/supabase-schema.md).
 ### Updating the board after pushing changes
 
 ```bash
-cd /home/debian/project
+cd ~/RuffFirmware
 ./scripts/update.sh      # git pull, rebuild, reinstall service files, restart both
 ```
 

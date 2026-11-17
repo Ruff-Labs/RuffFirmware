@@ -1,8 +1,8 @@
 [Unit]
 Description=Board Qt GUI
-# Start after the firmware, but don't die with it (no IPC between them yet)
-After=firmware.service systemd-user-sessions.service
-Wants=firmware.service
+# Don't wait for firmware.service: it waits for WiFi + NTP, which could leave the
+# screen blank for minutes. The GUI works on its own and picks up firmware status over UDP.
+After=systemd-user-sessions.service
 # eglfs takes over the display, so keep the login console off tty1
 Conflicts=getty@tty1.service
 After=getty@tty1.service

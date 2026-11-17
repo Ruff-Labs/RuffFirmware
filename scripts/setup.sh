@@ -29,6 +29,11 @@ fi
 # Build before enabling the services, otherwise they start with no binaries
 ./scripts/build.sh
 
-sudo cp systemd/*.service /etc/systemd/system/
+# Install the unit files pointed at wherever this repo is cloned
+# (they say /home/debian/project as a placeholder)
+REPO="$(pwd)"
+for f in systemd/*.service; do
+    sed "s|/home/debian/project|$REPO|g" "$f" | sudo tee "/etc/systemd/system/$(basename "$f")" >/dev/null
+done
 sudo systemctl daemon-reload
 sudo systemctl enable --now firmware gui
