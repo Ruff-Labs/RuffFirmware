@@ -20,12 +20,14 @@ Item {
     // }
 
 
+    // ListElement values must be constants (no bindings), so the model only says WHICH
+    // sensor each card is; the delegate below reads its live value from `backend`.
     ListModel {
         id: sensorModel
-        ListElement { name: "Alignment"; lane: "Lane 1"; status: backend.aligned[0] ? "ok" : "error"; reading: backend.aligned[0] ? "Aligned" : "Not aligned" }
-        ListElement { name: "Beam"; lane: "Lane 1"; status: backend.beamBroken[0] ? "ok" : "error"; reading: backend.beamBroken[0] ? "Broken" : "Clear" }
-        ListElement { name: "Alignment"; lane: "Lane 2"; status: backend.aligned[1] ? "ok" : "error"; reading: backend.aligned[1] ? "Aligned" : "Not aligned" }
-        ListElement { name: "Beam"; lane: "Lane 2"; status: backend.beamBroken[1] ? "ok" : "error"; reading: backend.beamBroken[1] ? "Broken" : "Clear" }
+        ListElement { name: "Alignment"; lane: "Lane 1"; kind: "align"; laneIndex: 0 }
+        ListElement { name: "Beam";      lane: "Lane 1"; kind: "beam";  laneIndex: 0 }
+        ListElement { name: "Alignment"; lane: "Lane 2"; kind: "align"; laneIndex: 1 }
+        ListElement { name: "Beam";      lane: "Lane 2"; kind: "beam";  laneIndex: 1 }
     }
 
     function statusColor(s) {
@@ -60,8 +62,14 @@ Item {
             delegate: Item {
                 required property string name
                 required property string lane
-                required property string status
-                required property string reading
+                required property string kind
+                required property int laneIndex
+
+                readonly property bool active: kind === "align" ? !!backend.aligned[laneIndex]
+                                                                : !!backend.beamBroken[laneIndex]
+                readonly property string status: active ? "ok" : "error"
+                readonly property string reading: kind === "align" ? (active ? "Aligned" : "Not aligned")
+                                                                   : (active ? "Broken" : "Clear")
 
                 width: grid.cellWidth
                 height: grid.cellHeight
