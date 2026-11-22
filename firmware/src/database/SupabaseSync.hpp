@@ -24,11 +24,13 @@ struct SyncConfig {
 
 class SupabaseSync {
 public:
-    bool start(const SyncConfig& cfg);                  // launch the worker thread
-    void enqueue(const std::vector<RaceRow>& rows);     // non-blocking, called from the state machine
-    void stop();                                        // finish current attempt, join thread
+    ~SupabaseSync() { stop(); }                         // a still-running std::thread would abort the program
 
-    int  last_synced_race() const;                      // read state_path, 0 if missing
+    bool start(const SyncConfig& cfg);                  // launch the worker thread; false = disabled, CSV only
+    void enqueue(const std::vector<RaceRow>& rows);     // non-blocking, called from the state machine
+    void stop();                                        // finish current attempt, join thread (safe to call twice)
+
+    int  last_synced_race() const;                      // read state_path, 0 if missing (call after start())
 
 private:
     void worker();

@@ -4,7 +4,6 @@
 //   [ ] 2. warmup clock: needs a remote button 3 + a GUI button, or delete Countdown   (TODO 2)
 //   [ ] 4. SensorEvents: report which pass was early, and confirm which
 //          pin is sensor #1 vs #2 (FORWARD / BACK)                                     (TODO 4)
-//   [ ] 5. Database.cpp: save start_ms + early_pass, write RACE_DNF as DNF             (TODO 5)
 //   [ ] 6. ask: is "4 or more exchanges" = 4 splits per lane?    (Timer.hpp, MIN_EXCHANGES)
 //   [ ] 7. test on the BeaglePlay with real sensors
 #include "timer/Timer.hpp"
@@ -115,7 +114,7 @@ double Timer::elapsed_ms(uint64_t now) const {
     return 0.0;
 }
 
-// TODO 5: Database.cpp has to write RACE_DNF as "DNF", and also save start_ms and early_pass
+// Database.cpp writes RACE_DNF as "DNF", and saves start_ms + early_pass in their own columns
 double Timer::race_ms(int lane) const {
     if (!valid_lane(lane)) return RACE_DNF;
     const LaneTime& L = lanes_[lane];

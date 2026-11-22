@@ -8,7 +8,7 @@ sudo apt update
 sudo apt install -y \
     build-essential cmake git pkg-config \
     libgpiod-dev gpiod \
-    libcurl4-openssl-dev nlohmann-json3-dev \
+    libcurl4-openssl-dev \
     qt6-base-dev qt6-declarative-dev qt6-qpa-plugins \
     qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
     qml6-module-qtquick-templates qml6-module-qtqml-workerscript
@@ -29,6 +29,11 @@ fi
 # Build before enabling the services, otherwise they start with no binaries
 ./scripts/build.sh
 
-sudo cp systemd/*.service /etc/systemd/system/
+# Install the unit files pointed at wherever this repo is cloned
+# (they say /home/debian/project as a placeholder)
+REPO="$(pwd)"
+for f in systemd/*.service; do
+    sed "s|/home/debian/project|$REPO|g" "$f" | sudo tee "/etc/systemd/system/$(basename "$f")" >/dev/null
+done
 sudo systemctl daemon-reload
 sudo systemctl enable --now firmware gui
