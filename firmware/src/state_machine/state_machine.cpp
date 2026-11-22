@@ -1,5 +1,7 @@
 #include "state_machine.hpp"
 
+using protocol::RaceState;   // the enum lives in common/protocol.h so the GUI can share it
+
 using namespace std::chrono_literals;
 using Clock = std::chrono::steady_clock;   // same clock (CLOCK_MONOTONIC) gpiod uses for edge timestamps
 
@@ -93,11 +95,12 @@ static uint64_t to_ns(Clock::time_point t){
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
 }
 
-// prints the results for now
-static void write_race_table(const RaceData& d, const Timer& timer) {
-    // TODO: hand this off to the database code (Database.cpp TODO 8):
-    //   1. db.save_race(..., &saved)  -> CSV backup on the board, must succeed first
-    //   2. sync.enqueue(saved)        -> same rows to Supabase in the background (never blocks)
+// TODO: where the heat number comes from is still open (judge remote, GUI SetupScreen, or
+//       auto-increment). Until that's decided every race is saved as heat 1.
+constexpr int HEAT_NUMBER = 1;
+
+// Prints the results to the log, saves them to the CSV, then hands the same rows to Supabase.
+static void write_race_table(const RaceData& d, const Timer& timer, Database& db, SupabaseSync& sync) {
     for (int lane : { LEFT, RIGHT }) {
         const LaneTime& L  = timer.lane(lane);
         const double    ms = timer.race_ms(lane);          // final time since green, or RACE_DNF
@@ -108,6 +111,21 @@ static void write_race_table(const RaceData& d, const Timer& timer) {
                     L.n_splits, d.false_starts[lane], d.reruns_owed[lane]);
     }
     std::printf("winner: %d\n", d.winner);
+
+    // CSV backup first; only a race that's safely on disk gets uploaded
+    RaceRecord rec;
+    rec.heat  = HEAT_NUMBER;
+    rec.race  = db.next_race_number();
+    rec.timer = &timer;
+    rec.winner = d.winner;
+    for (int lane : { LEFT, RIGHT }) rec.false_starts[lane] = d.false_starts[lane];
+    std::vector<RaceRow> saved;
+    if (db.save_race(rec, &saved)) {
+        std::printf("saved as race %d\n", rec.race);
+        sync.enqueue(saved);   // background thread, never blocks the race loop
+    } else {
+        std::fprintf(stderr, "race %d NOT saved to the CSV (and not uploaded)\n", rec.race);
+    }
 }
 
 // When a beam break happened: the sensor's kernel timestamp if we have one, otherwise "now".
@@ -117,7 +135,8 @@ static uint64_t break_time(const RaceInputs& in, int lane, Clock::time_point now
 }
 
 // ---------- the state machine ----------
-void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& sensors, Remote& remote, Timer& timer) {
+void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& sensors, Remote& remote, Timer& timer,
+               Database& db, SupabaseSync& sync) {
     const auto now = Clock::now();
 
     // judge abort works from anywhere (= Reset Heat: false starts are kept)
@@ -258,7 +277,7 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& s
                 m.data.winner = pick_winner(timer);          // lowest final time from the Timer
                 tree.allOff();
                 if (m.data.winner >= 0) tree.on(GREEN_LIGHT[m.data.winner]);
-                write_race_table(m.data, timer);
+                write_race_table(m.data, timer, db, sync);
             }
             if (in.judge_ack || in_state >= FINISHED_HOLD)
                 m.state = RaceState::Reset;
@@ -321,15 +340,14 @@ void poll_inputs(Sensors& sensors, Remote& remote, RaceInputs& in) {
 }
 
 // ---------- main loop ----------
-// TODO: call from main.cpp (still Hello World)
-// TODO: also pass in the Database + SupabaseSync that main.cpp opens/starts
-void run_race(LightTree& tree, Sensors& sensors, Remote& remote) {
+void run_race(LightTree& tree, Sensors& sensors, Remote& remote,
+              Database& db, SupabaseSync& sync, const std::atomic<bool>& stop) {
     RaceMachine m;
     RaceInputs  in;
     Timer       timer;
-    for (;;) {
+    while (!stop) {
         poll_inputs(sensors, remote, in);
-        race_tick(m, in, tree, sensors, remote, timer);
+        race_tick(m, in, tree, sensors, remote, timer, db, sync);
         std::this_thread::sleep_for(1ms);   // 1 kHz tick; timing accuracy comes from timestamps, not this
     }
 }

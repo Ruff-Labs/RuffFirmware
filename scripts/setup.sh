@@ -8,7 +8,7 @@ sudo apt update
 sudo apt install -y \
     build-essential cmake git pkg-config \
     libgpiod-dev gpiod \
-    libcurl4-openssl-dev nlohmann-json3-dev \
+    libcurl4-openssl-dev \
     qt6-base-dev qt6-declarative-dev qt6-qpa-plugins \
     qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
     qml6-module-qtquick-templates qml6-module-qtqml-workerscript

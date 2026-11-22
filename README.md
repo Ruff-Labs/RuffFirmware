@@ -16,6 +16,11 @@ Everything builds from the **top-level** `CMakeLists.txt`. On Mac/Windows CMake 
 
 ---
 
+
+BEAGLE BOARD CRED CHANGE LATER FOR NOW ITS
+user_name = debian
+user_pass = rufflab
+
 ## Running the GUI on a Mac
 
 Requires Qt **6.5 or newer** and CMake.

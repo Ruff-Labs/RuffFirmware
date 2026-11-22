@@ -110,9 +110,9 @@ Item {
 
             NavTile {
                 Layout.fillWidth: true; Layout.fillHeight: true
-                value: "80%"
+                value: backend.ipAddress !== "" ? backend.ipAddress : "Offline"
                 label: "Settings"
-                subtitle: "Brightness"
+                subtitle: "Network"
                 accentColor: Theme.textMuted
                 onClicked: root.openScreen("settings")
             }

@@ -9,7 +9,6 @@ Item {
     property string title: "Settings"
     property string subtitle: "Network and system "   // shown under the title in PageHeader
 
-    //property alias brightness: brightnessSlider.value
     property alias networkName: networkNameField.text
     property alias networkPassword: networkPasswordField.text
     //property alias soundEnabled: soundSwitch.checked
@@ -132,29 +131,6 @@ Item {
                 }
             }
 
-            // ---- Display ----
-            // SectionLabel { text: "Display" }
-            // Card {
-            //     Layout.fillWidth: true
-            //     implicitHeight: 72
-            //     RowLayout {
-            //         anchors.fill: parent
-            //         Text { text: "Brightness"; color: Theme.textPrimary; font.pixelSize: Theme.fontBody }
-            //         Slider {
-            //             id: brightnessSlider
-            //             Layout.fillWidth: true
-            //             from: 10; to: 100; value: 80; stepSize: 5
-            //         }
-            //         Text {
-            //             text: Math.round(brightnessSlider.value) + "%"
-            //             color: Theme.textMuted; font.pixelSize: Theme.fontSmall
-            //             Layout.preferredWidth: 44
-            //             horizontalAlignment: Text.AlignRight
-            //         }
-            //     }
-            // }
-
-            // }
             // ---- Sound ----
             // SectionLabel { text: "Sound"; Layout.topMargin: Theme.spacingMd }
             // Card {
