@@ -52,7 +52,7 @@ Item {
                     SectionLabel { text: "Next race"; color: Theme.accent }
                     Text {
                         Layout.fillWidth: true
-                        text: "Lane 1  vs  Lane 2"
+                        text: backend.laneNames[0] + "  vs  " + backend.laneNames[1]
                         color: Theme.textPrimary
                         font.pixelSize: Theme.fontTitle + 4
                         font.weight: Font.DemiBold
@@ -60,7 +60,8 @@ Item {
                         elide: Text.ElideRight
                     }
                     Text {
-                        text: "3 heats  ·  gates armed"
+                        text: backend.heats > 0 ? backend.heats + (backend.heats === 1 ? " heat" : " heats")
+                                                : "Not set up yet"
                         color: Theme.textMuted
                         font.pixelSize: Theme.fontSmall
                     }

@@ -3,8 +3,9 @@ import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import BoardGui
 
-// Pre-race configuration. Values are local for now; later bind them to a
-// C++ backend (e.g. RaceConfig.lane1Name) so the Race screen can read them.
+// Pre-race configuration. "Start Race" sends the lane names + heats to the firmware
+// (virtualRemote.setupRace), which starts a new race with them and echoes them back,
+// so the Race and Home screens show them via backend.laneNames / backend.heats.
 Item {
     id: root
     property string title: "Setup"
@@ -98,7 +99,20 @@ Item {
                 Layout.fillWidth: true
                 text: "Start Race"
                 variant: "primary"
-                onClicked: root.startRace()
+                // the firmware ignores a setup mid-heat anyway; this just makes that visible
+                enabled: backend.connected && !backend.raceActive
+                onClicked: {
+                    virtualRemote.setupRace(root.lane1Name, root.lane2Name, root.heats)
+                    root.startRace()
+                }
+            }
+            Text {
+                Layout.fillWidth: true
+                visible: !backend.connected || backend.raceActive
+                text: !backend.connected ? "Firmware not running" : "Finish or abort the current heat first"
+                color: Theme.textMuted
+                font.pixelSize: Theme.fontSmall
+                wrapMode: Text.WordWrap
             }
         }
     }

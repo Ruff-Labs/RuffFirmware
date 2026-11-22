@@ -16,9 +16,10 @@ enum class RemoteCmd;   // defined in Remote.hpp
 // Virtual remote: button presses from the GUI instead of the RF receiver.
 // For testing the rest of the firmware before the receiver is wired up.
 //
-// The GUI sends one UDP packet per press (one byte, protocol::RemoteButton) to
-// protocol::kRemotePort. Remote owns one of these and feeds its presses through the
-// same code as the real buttons, so the state machine can't tell the difference.
+// The GUI sends one UDP packet per press (one protocol::Command byte) to protocol::kRemotePort.
+// Remote owns one of these and feeds its presses through the same code as the real buttons,
+// so the state machine can't tell the difference. The same link also carries the head-table
+// commands (Reset Race, and a protocol::SetupPacket from the Setup screen).
 //
 // TODO: delete this (and the GUI's Remote screen) once the real receiver works,
 //       or keep it as a backup remote for the head table.
@@ -28,8 +29,8 @@ public:
     bool begin(uint16_t port = protocol::kRemotePort);   // open the UDP socket; false on failure
 
     // Non-blocking. Returns the next waiting press (and when it arrived) or false if none.
-    // Call in a loop until it returns false.
-    bool next(RemoteCmd& cmd, uint64_t& t_ns);
+    // For RemoteCmd::SetupRace, `setup` holds the lane names + heats. Call in a loop until false.
+    bool next(RemoteCmd& cmd, uint64_t& t_ns, protocol::RaceSetup& setup);
 
 private:
     int fd_ = -1;

@@ -16,7 +16,9 @@
 //   RESET  judge_ack: clears the Finished screen early
 //   ABORT  sends any race state to Reset
 
-enum class RemoteCmd { None, Ready, Start, Stop, Reset, Abort };
+// Ready..Abort are the judge remote's buttons; ResetRace and SetupRace only come from the GUI
+// (head table), over the same link as the virtual remote.
+enum class RemoteCmd { None, Ready, Start, Stop, Reset, Abort, ResetRace, SetupRace };
 
 // What the remote hands to the state machine each tick.
 // poll_inputs() copies these into RaceInputs.
@@ -27,6 +29,8 @@ struct RemoteInputs {
     uint64_t t_stop_ns = 0;       // kernel timestamp of that press, handed to Timer::stop()
     bool judge_ack     = false;   // one-shot
     bool abort         = false;   // one-shot
+    bool reset_race    = false;   // one-shot, from the GUI: new race, clears false starts too
+    std::optional<protocol::RaceSetup> setup;   // one-shot, from the GUI's Setup screen
 };
 
 class Remote {
@@ -48,7 +52,7 @@ private:
     void apply(RemoteCmd cmd, uint64_t t_ns, RemoteInputs& out);   // what a button does (real or virtual)
     Button* find(unsigned line);
 
-    std::array<Button, 5>              buttons_;   // one per RemoteCmd (except None)
+    std::array<Button, 5>              buttons_;   // one per physical button (Ready..Abort)
     std::optional<gpiod::line_request> req_;
     gpiod::edge_event_buffer           buf_{16};
     bool ready_latched_ = false;

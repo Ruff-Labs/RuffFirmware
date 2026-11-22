@@ -1,22 +1,27 @@
 #pragma once
 #include <cstdint>
-//TODO: change this is gonna be the message exchange between the firmware and gui
+
+// Everything the firmware and the GUI both need, in one place, so the two can't drift apart.
+//
+// Two UDP links, both plain structs sent as raw bytes (every target is little-endian):
+//   firmware -> GUI   RaceStatus on kGuiPort, every 50 ms and on every state change
+//   GUI -> firmware   commands on kRemotePort: one Command byte, or a SetupPacket
+// Change a packet's layout -> bump kProtocolVersion, so an old GUI ignores the new packets
+// instead of showing garbage.
 namespace protocol {
 
-struct RaceStatus {
-    uint8_t state;            // RaceState as a number (Idle=0, Ready=1, ...)
-    uint8_t judge_ready;
-    double  clock_ms;         // Timer::elapsed_ms(): negative in countdown, frozen after STOP
-    uint8_t aligned[2];       // per lane: ALIGN high
-    uint8_t beam_broken[2];   // per lane: FORWARD/BACK broken right now
-    uint8_t n_splits[2];
-    double  race_ms[2];       // final time, or RACE_DNF
-    double  start_ms[2];      // reaction time (negative = false start)
-    uint8_t false_starts[2];
-    int8_t  winner;           // -1 = none
-};
+constexpr uint16_t kGuiPort    = 5555;   // firmware -> GUI: RaceStatus
+constexpr uint16_t kRemotePort = 5556;   // GUI -> firmware: Command / SetupPacket
 
-enum class RaceState {
+constexpr uint32_t kStatusMagic     = 0x46465552;   // "RUFF"
+constexpr uint8_t  kProtocolVersion = 1;
+
+constexpr int    kNumLanes    = 2;      // [0] = lane 1 (LEFT), [1] = lane 2 (RIGHT)
+constexpr int    kLaneNameLen = 32;     // bytes incl. the terminating 0 (UTF-8)
+constexpr double kRaceDnf     = -1.0;   // race time for a lane with no final time
+
+// ---------- shared enums ----------
+enum class RaceState : uint8_t {
     Idle,
     Ready,
     Sequence,
@@ -27,21 +32,71 @@ enum class RaceState {
     ResetRace    // "Reset Race": clears everything, including false starts and red lights
 };
 
+inline const char* race_state_name(RaceState s) {
+    switch (s) {
+        case RaceState::Idle:       return "Idle";
+        case RaceState::Ready:      return "Ready";
+        case RaceState::Sequence:   return "Sequence";
+        case RaceState::Running:    return "Running";
+        case RaceState::FalseStart: return "False start";
+        case RaceState::Finished:   return "Finished";
+        case RaceState::Reset:      return "Reset";
+        case RaceState::ResetRace:  return "Reset race";
+    }
+    return "Unknown";
+}
 
+// A false start doesn't take a lane out of the heat, so there's no FalseStart status:
+// it shows up as a negative start_ms instead.
+enum class LaneStatus : uint8_t { Waiting, Running, Finished, DNF };
 
-constexpr uint16_t kGuiPort  = 5555;   // if they talk over a socket
-constexpr int      kMaxLeds  = 8;
-
-// Virtual remote (testing without the RF receiver): the GUI sends ONE byte per button press
-// as a UDP packet to the firmware on this port. The byte is a RemoteButton value.
-constexpr uint16_t kRemotePort = 5556;
-
-enum class RemoteButton : uint8_t {
-    Ready = 1,
-    Start = 2,
-    Stop  = 3,
-    Reset = 4,
-    Abort = 5,
+// ---------- GUI -> firmware ----------
+// The first byte of every packet. 1-5 are the judge remote's buttons (the GUI's Remote screen
+// stands in for the RF remote); the rest are head-table commands that only the GUI sends.
+enum class Command : uint8_t {
+    Ready     = 1,
+    Start     = 2,
+    Stop      = 3,
+    Reset     = 4,
+    Abort     = 5,
+    ResetRace = 6,   // new race: clears false starts and red lights too
+    SetupRace = 7,   // SetupPacket: lane names + heats, then Reset Race (ignored mid-heat)
 };
+
+#pragma pack(push, 1)
+
+struct RaceSetup {
+    uint8_t heats = 0;                                  // 0 = not set up yet
+    char    lane_names[kNumLanes][kLaneNameLen] = {};   // UTF-8, always 0-terminated, "" = not set
+};
+
+struct SetupPacket {
+    uint8_t   command = uint8_t(Command::SetupRace);
+    RaceSetup setup;
+};
+
+// ---------- firmware -> GUI ----------
+struct RaceStatus {
+    uint32_t magic   = kStatusMagic;
+    uint8_t  version = kProtocolVersion;
+
+    uint8_t  state       = 0;              // RaceState
+    uint8_t  judge_ready = 0;
+    double   clock_ms    = 0.0;            // Timer::elapsed_ms(): negative in countdown, frozen after STOP
+    int8_t   winner      = -1;             // -1 = none, else lane index
+
+    uint8_t  aligned[kNumLanes]      = {};  // ALIGN high
+    uint8_t  beam_broken[kNumLanes]  = {};  // FORWARD/BACK broken right now
+    uint8_t  lane_status[kNumLanes]  = {};  // LaneStatus
+    uint8_t  n_splits[kNumLanes]     = {};
+    double   race_ms[kNumLanes]      = {};  // final time; only meaningful when lane_status == Finished
+    uint8_t  has_start[kNumLanes]    = {};  // start dog's first trigger seen
+    double   start_ms[kNumLanes]     = {};  // reaction time vs green (negative = false start)
+    uint8_t  false_starts[kNumLanes] = {};
+
+    RaceSetup setup;                        // what the Setup screen last sent
+};
+
+#pragma pack(pop)
 
 }  // namespace protocol

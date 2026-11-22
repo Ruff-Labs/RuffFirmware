@@ -39,23 +39,44 @@ bool VirtualRemote::begin(uint16_t port) {
 }
 
 // ---------- per-tick read (non-blocking) ----------
-bool VirtualRemote::next(RemoteCmd& cmd, uint64_t& t_ns) {
+bool VirtualRemote::next(RemoteCmd& cmd, uint64_t& t_ns, protocol::RaceSetup& setup) {
     if (fd_ < 0) return false;
 
-    uint8_t byte;
-    while (recv(fd_, &byte, 1, 0) == 1) {   // -1 with EAGAIN = nothing waiting
+    // one datagram per recv(); bigger than any packet so a too-long one is caught, not cut
+    uint8_t buf[sizeof(protocol::SetupPacket) + 16];
+    ssize_t n;
+    while ((n = recv(fd_, buf, sizeof buf, 0)) > 0) {   // -1 with EAGAIN = nothing waiting
         t_ns = mono_ns();                   // arrival time (a few ms after the tap, fine for testing)
-        switch (static_cast<protocol::RemoteButton>(byte)) {
-            case protocol::RemoteButton::Ready: cmd = RemoteCmd::Ready; break;
-            case protocol::RemoteButton::Start: cmd = RemoteCmd::Start; break;
-            case protocol::RemoteButton::Stop:  cmd = RemoteCmd::Stop;  break;
-            case protocol::RemoteButton::Reset: cmd = RemoteCmd::Reset; break;
-            case protocol::RemoteButton::Abort: cmd = RemoteCmd::Abort; break;
+        const uint8_t byte = buf[0];
+        using protocol::Command;
+        switch (static_cast<Command>(byte)) {
+            case Command::Ready:     cmd = RemoteCmd::Ready;     break;
+            case Command::Start:     cmd = RemoteCmd::Start;     break;
+            case Command::Stop:      cmd = RemoteCmd::Stop;      break;
+            case Command::Reset:     cmd = RemoteCmd::Reset;     break;
+            case Command::Abort:     cmd = RemoteCmd::Abort;     break;
+            case Command::ResetRace: cmd = RemoteCmd::ResetRace; break;
+            case Command::SetupRace: {
+                if (size_t(n) != sizeof(protocol::SetupPacket)) {
+                    std::fprintf(stderr, "virtual remote: setup packet is %zd bytes, expected %zu "
+                                         "(GUI and firmware built from different versions?), ignored\n",
+                                 n, sizeof(protocol::SetupPacket));
+                    continue;
+                }
+                protocol::SetupPacket p;
+                std::memcpy(&p, buf, sizeof p);
+                setup = p.setup;
+                for (auto& name : setup.lane_names) name[protocol::kLaneNameLen - 1] = '\0';   // never trust the 0
+                cmd = RemoteCmd::SetupRace;
+                std::printf("virtual remote: setup \"%s\" vs \"%s\", %u heats\n",
+                            setup.lane_names[0], setup.lane_names[1], setup.heats);
+                return true;
+            }
             default:
-                std::fprintf(stderr, "virtual remote: unknown button byte %u, ignored\n", byte);
+                std::fprintf(stderr, "virtual remote: unknown command byte %u, ignored\n", byte);
                 continue;                   // try the next packet
         }
-        std::printf("virtual remote: button %u\n", byte);
+        std::printf("virtual remote: command %u\n", byte);
         return true;
     }
     return false;

@@ -24,6 +24,9 @@
 //   Reset       "Reset Heat": clears times, keeps false starts + their red lights -> Idle
 //   ResetRace   "Reset Race": clears everything (also runs on boot)               -> Idle
 //   ABORT on the remote jumps to Reset from any state except Idle.
+//   From the GUI (head table): "Reset Race" jumps to ResetRace from any state; the Setup
+//   screen's "Start Race" sets lane names + heats and does a Reset Race (ignored mid-heat).
+//   Status goes back to the GUI every 50 ms and on every state change (gui_link/StatusSender).
 //
 // False start rules:
 //   1st (either team)     -> stop the heat, red light on, restart the sequence

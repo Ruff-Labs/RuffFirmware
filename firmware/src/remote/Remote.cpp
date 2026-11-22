@@ -84,9 +84,13 @@ RemoteInputs Remote::poll() {
     }
 
     // GUI presses: no debounce/lockout needed, one packet = one press
-    RemoteCmd cmd;
-    uint64_t  t;
-    while (virtual_.next(cmd, t)) apply(cmd, t, out);
+    RemoteCmd           cmd;
+    uint64_t            t;
+    protocol::RaceSetup setup;
+    while (virtual_.next(cmd, t, setup)) {
+        if (cmd == RemoteCmd::SetupRace) out.setup = setup;   // the payload doesn't fit apply()
+        else                             apply(cmd, t, out);
+    }
 
     out.judge_ready = ready_latched_;   // READY is a level, re-sent every tick
     return out;
@@ -124,6 +128,13 @@ void Remote::apply(RemoteCmd cmd, uint64_t t_ns, RemoteInputs& out) {
 
       case RemoteCmd::Abort:
         out.abort = true;   // any race state -> Reset
+        break;
+
+      case RemoteCmd::ResetRace:
+        out.reset_race = true;   // GUI only: new race
+        break;
+
+      case RemoteCmd::SetupRace:   // handled in poll(), it carries a RaceSetup
         break;
 
       case RemoteCmd::None:

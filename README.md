@@ -108,6 +108,22 @@ sudo systemctl restart firmware
 
 See [docs/supabase-schema.md](docs/supabase-schema.md).
 
+### Watching / driving the board from a laptop GUI
+
+The firmware and GUI talk over UDP (`common/include/common/protocol.h`): status to the GUI on
+port 5555, commands to the firmware on 5556. On the board both sides use 127.0.0.1. To use a
+GUI on a laptop instead:
+
+```bash
+# on the board: also send status to the laptop
+echo "GUI_HOST=<laptop-ip>" | sudo tee -a /etc/ruff/firmware.env && sudo systemctl restart firmware
+# on the laptop: send commands to the board
+RUFF_BOARD_HOST=<board-ip> ./build/gui/race_gui.app/Contents/MacOS/race_gui
+```
+
+Build the GUI and firmware from the same commit: the GUI ignores status packets from a
+different protocol version (and logs it once).
+
 ### Updating the board after pushing changes
 
 ```bash

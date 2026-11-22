@@ -1,26 +1,19 @@
 #include "state_machine.hpp"
+#include "gui_link/StatusSender.hpp"
+#include <algorithm>
+#include <cstring>
 
 using protocol::RaceState;   // the enum lives in common/protocol.h so the GUI can share it
 
 using namespace std::chrono_literals;
 using Clock = std::chrono::steady_clock;   // same clock (CLOCK_MONOTONIC) gpiod uses for edge timestamps
 
-// enum class RaceState {
-//     Idle,
-//     Ready,
-//     Sequence,
-//     Running,
-//     FalseStart,
-//     Finished,
-//     Reset,       // "Reset Heat": clears the clock/times, KEEPS false start counts + red lights
-//     ResetRace    // "Reset Race": clears everything, including false starts and red lights
-// };
-
 enum Lane { LEFT = 0, RIGHT = 1 };
 
 // ---------- tuning ----------
 constexpr auto FALSE_START_FLASH = 2s;    // heat stays stopped at least this long before it can restart
 constexpr auto FINISHED_HOLD     = 5s;    // how long the winner light stays if judge never acks
+constexpr auto STATUS_EVERY      = 50ms;  // GUI status rate (also sent right away on every state change)
 
 // light names per lane (must match LightTree::PIN_MAP)
 const char* ALIGN_LIGHT[2] = { "left_align", "right_align" };
@@ -46,7 +39,8 @@ struct RaceInputs {
     uint64_t t_stop       = 0;                // ns, when STOP was pressed (kernel timestamp)
     bool judge_ack        = false;            // from remote: RESET, clears the finished screen (one tick)
     bool abort            = false;            // from remote: judge cancel / e-stop (one tick) -> Reset Heat
-    bool reset_race       = false;            // "Reset Race" (one tick) -> ResetRace. TODO: wire to the head table GUI
+    bool reset_race       = false;            // from the GUI: "Reset Race" (one tick) -> ResetRace
+    std::optional<protocol::RaceSetup> setup; // from the GUI's Setup screen (one tick) -> new race with these names
     bool lane_aligned[2]  = { false, false }; // from sensors: ALIGN high = beam reflecting across the lane, lane ready
     bool beam_broken[2]   = { false, false }; // from sensors: FORWARD or BACK broken (false start before green)
     uint64_t t_break[2]   = { 0, 0 };         // ns, when that break happened (0 = unknown) -> timer.start_time()
@@ -71,6 +65,7 @@ struct RaceMachine {
     Clock::time_point step_started{};       // when the current sequence light came on
     int seq_step = 0;                       // index into SEQUENCE[]
     RaceData data;                          // current race data
+    protocol::RaceSetup setup;              // lane names + heats from the Setup screen (kept across resets)
 };
 
 // ---------- helpers ----------
@@ -138,6 +133,21 @@ static uint64_t break_time(const RaceInputs& in, int lane, Clock::time_point now
 void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& sensors, Remote& remote, Timer& timer,
                Database& db, SupabaseSync& sync) {
     const auto now = Clock::now();
+
+    // Setup screen's "Start Race": new lane names / heats = a new race. Not while a heat is
+    // under way, so a stray tap at the head table can't wipe it (Reset Race still can, on purpose).
+    if (in.setup) {
+        const bool mid_heat = m.state == RaceState::Sequence || m.state == RaceState::Running
+                           || m.state == RaceState::FalseStart;
+        if (mid_heat) {
+            std::fprintf(stderr, "setup from the GUI ignored: a heat is in progress\n");
+        } else {
+            m.setup = *in.setup;
+            m.state = RaceState::ResetRace;
+            std::printf("new race: \"%s\" vs \"%s\", %u heats\n",
+                        m.setup.lane_names[LEFT], m.setup.lane_names[RIGHT], m.setup.heats);
+        }
+    }
 
     // judge abort works from anywhere (= Reset Heat: false starts are kept)
     if (in.abort && m.state != RaceState::Idle && m.state != RaceState::Reset)
@@ -337,17 +347,53 @@ void poll_inputs(Sensors& sensors, Remote& remote, RaceInputs& in) {
     in.t_stop        = r.t_stop_ns;
     in.judge_ack     = r.judge_ack;
     in.abort         = r.abort;
+    in.reset_race    = r.reset_race;
+    in.setup         = r.setup;
+}
+
+// ---------- GUI status ----------
+// Everything the GUI screens show, from the current tick (protocol::RaceStatus).
+static protocol::RaceStatus make_status(const RaceMachine& m, const RaceInputs& in, const Timer& timer) {
+    protocol::RaceStatus s;
+    s.state       = uint8_t(m.state);
+    s.judge_ready = in.judge_ready;
+    s.clock_ms    = timer.elapsed_ms(Timer::now_ns());
+    s.winner      = int8_t(m.data.winner);
+    for (int lane : { LEFT, RIGHT }) {
+        const LaneTime& L     = timer.lane(lane);
+        s.aligned[lane]       = in.lane_aligned[lane];
+        s.beam_broken[lane]   = in.beam_broken[lane];
+        s.lane_status[lane]   = uint8_t(L.status);
+        s.n_splits[lane]      = uint8_t(L.n_splits);
+        s.race_ms[lane]       = timer.race_ms(lane);
+        s.has_start[lane]     = L.has_start;
+        s.start_ms[lane]      = L.start_ms;
+        s.false_starts[lane]  = uint8_t(std::min(m.data.false_starts[lane], 255));
+    }
+    std::memcpy(&s.setup, &m.setup, sizeof s.setup);
+    return s;
 }
 
 // ---------- main loop ----------
 void run_race(LightTree& tree, Sensors& sensors, Remote& remote,
               Database& db, SupabaseSync& sync, const std::atomic<bool>& stop) {
-    RaceMachine m;
-    RaceInputs  in;
-    Timer       timer;
+    RaceMachine  m;
+    RaceInputs   in;
+    Timer        timer;
+    StatusSender gui;
+    gui.begin();
+    RaceState         sent_state = m.state;
+    Clock::time_point sent_at{};
     while (!stop) {
         poll_inputs(sensors, remote, in);
         race_tick(m, in, tree, sensors, remote, timer, db, sync);
+
+        const auto now = Clock::now();
+        if (m.state != sent_state || now - sent_at >= STATUS_EVERY) {
+            gui.send(make_status(m, in, timer));
+            sent_state = m.state;
+            sent_at    = now;
+        }
         std::this_thread::sleep_for(1ms);   // 1 kHz tick; timing accuracy comes from timestamps, not this
     }
 }

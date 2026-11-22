@@ -47,8 +47,8 @@ Item {
 
             Repeater {
                 model: [
-                    { name: "Lane 1", lane: 0, color: Theme.accent },
-                    { name: "Lane 2", lane: 1, color: Theme.warning }
+                    { lane: 0, color: Theme.accent },
+                    { lane: 1, color: Theme.warning }
                 ]
                 delegate: Card {
                     required property var modelData
@@ -60,7 +60,7 @@ Item {
                     ColumnLayout {
                         anchors.fill: parent
                         SectionLabel {
-                            text: modelData.name + (won ? "  ·  winner" : "")
+                            text: backend.laneNames[modelData.lane] + (won ? "  ·  winner" : "")
                             color: won ? Theme.success : modelData.color
                         }
                         Item { Layout.fillHeight: true }
@@ -105,6 +105,14 @@ Item {
                 text: "Reset"
                 enabled: backend.connected && !root.running
                 onClicked: virtualRemote.press("reset")
+            }
+            // head table: new race, also clears false starts + red lights (works mid-heat, on purpose)
+            AppButton {
+                Layout.fillWidth: true
+                text: "Reset Race"
+                variant: "danger"
+                enabled: backend.connected
+                onClicked: virtualRemote.press("resetRace")
             }
         }
     }

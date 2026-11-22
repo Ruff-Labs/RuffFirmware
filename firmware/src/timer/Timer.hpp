@@ -1,5 +1,6 @@
 #pragma once
 #include "sensors/SensorEvents.hpp"   // NUM_LANES
+#include <common/protocol.h>          // RACE_DNF and LaneStatus are shared with the GUI
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -23,11 +24,10 @@ constexpr int MAX_DOGS  = 10;   // FirstPass + Dog1..Dog9, same as the old CSV
 constexpr uint64_t START_LOCKOUT_NS = 3'000'000'000ull;  // sensors off 3 s after the start dog (spec 3.C.d)
 constexpr int      MIN_EXCHANGES    = 4;                 // a lane needs 4+ passes to get a final time (spec 3.E)
                                                          // TODO 6: ask Lee if "4 exchanges" means 4 splits
-constexpr double   RACE_DNF         = -1.0;              // race_ms() for a lane with no final time
+constexpr double   RACE_DNF         = protocol::kRaceDnf; // race_ms() for a lane with no final time
+static_assert(NUM_LANES == protocol::kNumLanes, "sensor lanes and protocol lanes must match");
 
-// A false start does NOT take a lane out of the heat, so there's no FalseStart status:
-// it shows up as a negative start_ms instead.
-enum class LaneStatus { Waiting, Running, Finished, DNF };
+using protocol::LaneStatus;   // Waiting, Running, Finished, DNF (no FalseStart: that's a negative start_ms)
 
 struct LaneTime {
     LaneStatus status    = LaneStatus::Waiting;

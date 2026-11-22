@@ -21,6 +21,8 @@ if [ ! -f /etc/ruff/firmware.env ]; then
 SUPABASE_URL=
 SUPABASE_KEY=
 BOARD_ID=
+# Optional: also send race status to a GUI running on a laptop (its IPv4 address)
+GUI_HOST=
 ENV
     sudo chmod 600 /etc/ruff/firmware.env
     echo "Edit /etc/ruff/firmware.env to enable Supabase upload"
