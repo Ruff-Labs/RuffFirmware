@@ -10,6 +10,7 @@ org; the website that shows race results is a separate repo there.
 | `common/`   | Shared headers (`protocol.h`)                           | everywhere           |
 | `scripts/`  | `setup.sh`, `build.sh`, `update.sh` for the board        | board                |
 | `systemd/`  | Services that start firmware + GUI on boot              | board                |
+| `tests/`    | Unit tests for the firmware logic (fake hardware)       | Mac, Linux           |
 
 Everything builds from the **top-level** `CMakeLists.txt`. On Mac/Windows CMake prints
 `libgpiodcxx not found, skipping firmware and tree_test`. That's expected; only the GUI gets built.
@@ -42,6 +43,20 @@ open build/gui/race_gui.app
 
 After changing code or QML, just run `cmake --build build --parallel` again (QML is compiled into
 the app through `resources.qrc`, so you need to rebuild after QML changes too).
+
+## Running the unit tests (Mac / Linux)
+
+`tests/` checks the Timer, the race state machine and the CSV/Supabase code on a laptop: the
+light tree, sensors and remote are faked, and races run on a simulated clock (the whole suite
+takes well under a second). Same build as above, then:
+
+```bash
+cmake --build build --target unit_tests --parallel
+ctest --test-dir build --output-on-failure     # or ./build/tests/unit_tests [name filter]
+```
+
+Run them before pushing firmware changes. They're skipped on Windows (the database code is
+POSIX-only) and not built on the board (`scripts/build.sh` turns them off).
 
 ## Running the GUI on Windows
 
@@ -97,6 +112,15 @@ cd ~/RuffFirmware
 4. installs `systemd/*.service` and starts **firmware** and **gui**, which also start on every boot
    (the GUI comes up right away; it doesn't wait for WiFi or the firmware)
 
+### Wi-Fi from the touchscreen
+
+Settings → Wi-Fi: type the network name + password (an on-screen keyboard comes up) and tap
+Connect. The firmware joins it with `nmcli`, so the board image needs **NetworkManager**: check
+once with `nmcli -v`. If it's missing, the Settings screen says so. A static IP / gateway / DNS
+is optional (blank = automatic). NetworkManager remembers the network for the next boot.
+
+Settings → Restart restarts the firmware and GUI services (a few seconds), for when something's stuck.
+
 ### Supabase upload (optional)
 
 Without this, races are only saved to `data/UFLI_races.csv`. To turn on uploading:
@@ -131,6 +155,10 @@ cd ~/RuffFirmware
 ./scripts/update.sh      # git pull, rebuild, reinstall service files, restart both
 ```
 
+`update.sh` doesn't install packages. If a pull adds one to `setup.sh` (like the on-screen
+keyboard, `qml6-module-qtquick-virtualkeyboard qt6-virtualkeyboard-plugin`), install it by hand
+or re-run `./scripts/setup.sh`.
+
 To rebuild local edits without pulling, run `./scripts/build.sh && sudo systemctl restart firmware gui`.
 
 ### Checking on it
@@ -154,7 +182,7 @@ sudo systemctl stop firmware gui
 # firmware: needs sudo for /dev/gpiochip*; load the Supabase env if you want uploads
 sudo bash -c 'set -a; source /etc/ruff/firmware.env; set +a; ./build/firmware/firmware'
 
-# light tree test program
+# light tree wiring check: each light on for 0.6 s, its name printed
 sudo ./build/firmware/tree_test
 
 # GUI straight on the screen (no desktop)

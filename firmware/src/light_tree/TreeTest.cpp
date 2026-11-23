@@ -1,45 +1,28 @@
 #include "light_tree/LightTree.hpp"
+#include <chrono>
 #include <iostream>
-#include <string>
+#include <thread>
 
 // Light tree test program, built as build/firmware/tree_test (stop the firmware service first):
-//   sudo ./build/firmware/tree_test test        # each light one by one
-//   sudo ./build/firmware/tree_test sportsman   # sportsman sequence
-//   sudo ./build/firmware/tree_test pro         # pro sequence
+//   sudo ./build/firmware/tree_test     # each light on for 0.6 s, one at a time, in PIN_MAP order
+// Use it to check the wiring: every name printed should match the light that comes on.
 
-int main(int argc, char* argv[]) {
+int main() {
     try {
         LightTree tree("gpiochip1");
-
-        // Simple menu based on command-line argument
-        std::string mode = (argc > 1) ? argv[1] : "sportsman";
-
-        if (mode == "sportsman") {
-            tree.runSportsmanTree();
-        } else if (mode == "pro") {
-            tree.runProTree();
-        } else if (mode == "test") {
-            // Cycle each light one at a time
-            for (const auto& name : {
-                    "left_align", "center_ready", "right_align",
-                    "yellow_1", "yellow_2",
-                    "left_red", "right_red",
-                    "left_green", "right_green", "blue"}) {
-                std::cout << "Testing: " << name << "\n";
-                tree.on(name);
-                std::this_thread::sleep_for(std::chrono::milliseconds(600));
-                tree.off(name);
-            }
-        } else {
-            std::cerr << "Usage: " << argv[0]
-                      << " [sportsman|pro|test]\n";
-            return 1;
+        for (const char* name : {
+                 "left_align", "center_ready", "right_align",
+                 "blue", "yellow_1", "yellow_2",
+                 "left_red", "right_red",
+                 "left_green", "right_green" }) {
+            std::cout << "Testing: " << name << std::endl;
+            tree.on(name);
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            tree.off(name);
         }
-    }
-    catch (const std::exception& e) {
+    } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
-
     return 0;
 }

@@ -2,8 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import BoardGui
 
-// Title area at the top of the content column. Took over the title job from
-// the old NavBar; reads `title` / `subtitle` off whichever screen is showing.
+// Title area at the top of the content column; shows `title` / `subtitle` of whichever screen is up.
 Item {
     id: root
     property string title: ""

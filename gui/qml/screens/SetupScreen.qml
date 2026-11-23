@@ -9,7 +9,7 @@ import BoardGui
 Item {
     id: root
     property string title: "Setup"
-    property string subtitle: "Configure lanes and heats"   // shown under the title in PageHeader
+    property string subtitle: "Configure lanes and heats"
     signal startRace()
 
     property alias lane1Name: lane1Field.text

@@ -1,9 +1,15 @@
-// VirtualRemote.cpp  —  judge remote buttons from the GUI (UDP), for testing without the RF receiver
 #include "remote/VirtualRemote.hpp"
 #include "remote/Remote.hpp"
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
 
-
-// same clock as gpiod edge timestamps and Timer::now_ns(), so a STOP press time can go to Timer::stop()
 static uint64_t mono_ns() {
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -14,19 +20,18 @@ VirtualRemote::~VirtualRemote() {
     if (fd_ >= 0) close(fd_);
 }
 
-// ---------- setup ----------
 bool VirtualRemote::begin(uint16_t port) {
     fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd_ < 0) {
         std::fprintf(stderr, "virtual remote: socket failed: %s\n", std::strerror(errno));
         return false;
     }
-    fcntl(fd_, F_SETFL, fcntl(fd_, F_GETFL) | O_NONBLOCK);   // poll() must never wait
+    fcntl(fd_, F_SETFL, fcntl(fd_, F_GETFL) | O_NONBLOCK);
 
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);   // any address, so a GUI on a laptop can drive the board too
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         std::fprintf(stderr, "virtual remote: bind to port %u failed: %s\n", port, std::strerror(errno));
@@ -38,15 +43,29 @@ bool VirtualRemote::begin(uint16_t port) {
     return true;
 }
 
-// ---------- per-tick read (non-blocking) ----------
-bool VirtualRemote::next(RemoteCmd& cmd, uint64_t& t_ns, protocol::RaceSetup& setup) {
+// copies a fixed-size packet out of buf; false (logged) if the size is wrong
+template <typename Packet>
+static bool read_packet(const uint8_t* buf, ssize_t n, Packet& p, const char* what) {
+    if (size_t(n) != sizeof(Packet)) {
+        std::fprintf(stderr, "virtual remote: %s packet is %zd bytes, expected %zu "
+                             "(GUI and firmware built from different versions?), ignored\n",
+                     what, n, sizeof(Packet));
+        return false;
+    }
+    std::memcpy(&p, buf, sizeof p);
+    return true;
+}
+
+template <size_t N>
+static void terminate(char (&s)[N]) { s[N - 1] = '\0'; }
+
+bool VirtualRemote::next(RemoteCmd& cmd, uint64_t& t_ns, Payload& payload) {
     if (fd_ < 0) return false;
 
-    // one datagram per recv(); bigger than any packet so a too-long one is caught, not cut
-    uint8_t buf[sizeof(protocol::SetupPacket) + 16];
+    uint8_t buf[sizeof(protocol::WifiPacket) + sizeof(protocol::SetupPacket)];   // bigger than any packet
     ssize_t n;
-    while ((n = recv(fd_, buf, sizeof buf, 0)) > 0) {   // -1 with EAGAIN = nothing waiting
-        t_ns = mono_ns();                   // arrival time (a few ms after the tap, fine for testing)
+    while ((n = recv(fd_, buf, sizeof buf, 0)) > 0) {   // -1 + EAGAIN: nothing waiting
+        t_ns = mono_ns();
         const uint8_t byte = buf[0];
         using protocol::Command;
         switch (static_cast<Command>(byte)) {
@@ -56,25 +75,32 @@ bool VirtualRemote::next(RemoteCmd& cmd, uint64_t& t_ns, protocol::RaceSetup& se
             case Command::Reset:     cmd = RemoteCmd::Reset;     break;
             case Command::Abort:     cmd = RemoteCmd::Abort;     break;
             case Command::ResetRace: cmd = RemoteCmd::ResetRace; break;
+            case Command::Restart:   cmd = RemoteCmd::Restart;   break;
             case Command::SetupRace: {
-                if (size_t(n) != sizeof(protocol::SetupPacket)) {
-                    std::fprintf(stderr, "virtual remote: setup packet is %zd bytes, expected %zu "
-                                         "(GUI and firmware built from different versions?), ignored\n",
-                                 n, sizeof(protocol::SetupPacket));
-                    continue;
-                }
                 protocol::SetupPacket p;
-                std::memcpy(&p, buf, sizeof p);
-                setup = p.setup;
-                for (auto& name : setup.lane_names) name[protocol::kLaneNameLen - 1] = '\0';   // never trust the 0
+                if (!read_packet(buf, n, p, "setup")) continue;
+                payload.setup = p.setup;
+                for (auto& name : payload.setup.lane_names) terminate(name);
                 cmd = RemoteCmd::SetupRace;
                 std::printf("virtual remote: setup \"%s\" vs \"%s\", %u heats\n",
-                            setup.lane_names[0], setup.lane_names[1], setup.heats);
+                            payload.setup.lane_names[0], payload.setup.lane_names[1], payload.setup.heats);
                 return true;
+            }
+            case Command::SetWifi: {
+                protocol::WifiPacket p;
+                if (!read_packet(buf, n, p, "wifi")) continue;
+                payload.wifi = p.wifi;
+                terminate(payload.wifi.ssid);
+                terminate(payload.wifi.password);
+                terminate(payload.wifi.address);
+                terminate(payload.wifi.gateway);
+                terminate(payload.wifi.dns);
+                cmd = RemoteCmd::SetWifi;
+                return true;   // not logged here: SystemControl logs it, without the password
             }
             default:
                 std::fprintf(stderr, "virtual remote: unknown command byte %u, ignored\n", byte);
-                continue;                   // try the next packet
+                continue;
         }
         std::printf("virtual remote: command %u\n", byte);
         return true;

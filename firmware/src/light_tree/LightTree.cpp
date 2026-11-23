@@ -1,11 +1,6 @@
 #include "light_tree/LightTree.hpp"
-#include <iostream>
-#include <thread>
 #include <stdexcept>
 
-using namespace std::chrono_literals; // 1s, 500ms, ...
-
-// ---- Pin map: light name -> GPIO line offset ----
 const std::map<std::string, unsigned int> LightTree::PIN_MAP = {
     {"left_align",   1},
     {"center_ready", 2},
@@ -32,7 +27,7 @@ gpiod::line_request LightTree::make_request(const std::string& chip) {
 
 LightTree::LightTree(const std::string& chipName) : request_(make_request(chipName)) {}
 
-LightTree::~LightTree() { allOff(); }   // request_ releases the lines itself
+LightTree::~LightTree() { allOff(); }
 
 void LightTree::set(const std::string& name, bool state) {
     auto it = PIN_MAP.find(name);
@@ -55,54 +50,3 @@ void LightTree::onGroup(const std::vector<std::string>& names) {
 void LightTree::offGroup(const std::vector<std::string>& names) {
     for (const auto& n : names) off(n);
 }
-
-void LightTree::wait(std::chrono::milliseconds ms) {
-    std::this_thread::sleep_for(ms);
-}
-
-// ---- Sportsman tree: ambers count down 0.5s apart ----
-void LightTree::runSportsmanTree() {
-    std::cout << "Running Sportsman tree...\n";
-    allOff();
-    wait(1s);
-
-    // pre-stage / stage
-    onGroup({"left_align", "right_align", "center_ready"});
-    wait(1s);
-
-    // yellow sequence
-    on("yellow_1");
-    wait(500ms);
-    off("yellow_1");
-    on("yellow_2");
-    wait(500ms);
-    off("yellow_2");
-
-    // green
-    onGroup({"left_green", "right_green"});
-    wait(3s);
-
-    allOff();
-}
-
-// ---- Pro tree: all ambers at once, 0.4s to green ----
-void LightTree::runProTree() {
-    std::cout << "Running Pro tree...\n";
-    allOff();
-    wait(1s);
-
-    onGroup({"left_align", "right_align", "center_ready"});
-    wait(1s);
-
-    // yellow
-    onGroup({"yellow_1", "yellow_2"});
-    wait(400ms);
-    offGroup({"yellow_1", "yellow_2"});
-
-    // green
-    onGroup({"left_green", "right_green"});
-    wait(3s);
-
-    allOff();
-}
-

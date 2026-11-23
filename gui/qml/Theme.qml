@@ -20,8 +20,7 @@ QtObject {
     readonly property color warning:      "#F5B83D"
     readonly property color danger:       "#FF5C5C"
 
-    // Premium layering: same palette, just finer tonal steps between layers.
-    // Dark UIs read as "expensive" through subtle depth, not loud shadows.
+    // finer tonal steps between layers, for depth without shadows
     readonly property color surfaceLow:   "#16191F"    // bottom of card gradients
     readonly property color surfaceRaised:"#20242D"    // cards sitting on cards
     readonly property color borderSubtle: "#992C313D"  // border at ~60% alpha (#AARRGGBB)
@@ -45,7 +44,6 @@ QtObject {
     readonly property int radius: 12
     readonly property int radiusSm: 8
     readonly property int radiusLg: 16
-    readonly property int navBarHeight: 56   // old top NavBar (no longer used)
     readonly property int sidebarWidth: 184  // leaves 616px for screen content
     readonly property int navItemHeight: 52
     readonly property int touchTarget: 48   // minimum tappable size

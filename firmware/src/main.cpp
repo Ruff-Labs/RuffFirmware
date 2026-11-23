@@ -10,6 +10,8 @@
 static std::atomic<bool> g_stop{ false };
 static void on_signal(int) { g_stop = true; }
 
+// Hardware, then the CSV backup and the Supabase upload (with a catch-up of anything not yet
+// uploaded), then the race loop until SIGTERM. A hardware error exits with 1 and systemd restarts us.
 int main() {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);   // print each line right away, so journalctl shows it live
     std::signal(SIGTERM, on_signal);
@@ -20,7 +22,7 @@ int main() {
         Sensors   sensors;
         Remote    remote;
 
-        if (!remote.begin())   // fails until the receiver pins are filled in (Remote.cpp TODO 1)
+        if (!remote.begin())   // until the receiver's pins are filled in (Remote.hpp)
             std::fprintf(stderr, "firmware: RF remote not set up, GUI remote only\n");
 
         // CSV backup on the board; races are still printed to the log if it can't be opened

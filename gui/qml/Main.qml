@@ -50,9 +50,7 @@ ApplicationWindow {
         if (stack.depth === 1) currentRoute = "home"
     }
 
-    // Sidebar on the left, page header + screens on the right.
-    // (Replaces the old `header: NavBar` - the sidebar now owns navigation,
-    // so there's no Back/Home button bar eating vertical space.)
+    // sidebar on the left, page header + screens on the right
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -92,6 +90,14 @@ ApplicationWindow {
                 replaceExit:  Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animFast } }
             }
         }
+    }
+
+    // on-screen keyboard for text fields, on the board only (see KeyboardPanel.qml)
+    Loader {
+        anchors.fill: parent
+        z: 99
+        active: onScreenKeyboard
+        source: "KeyboardPanel.qml"
     }
 
     // Escape / hardware back button

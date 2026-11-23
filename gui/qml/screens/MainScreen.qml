@@ -2,16 +2,17 @@ import QtQuick
 import QtQuick.Layouts
 import BoardGui
 
-// Home dashboard. The sidebar now handles navigation, so instead of a 2x2
-// grid that repeats the sidebar, Home shows status at a glance: a hero card
-// for the next race plus tappable status tiles.
-// TODO: the race/sensor values below are placeholders - bind them to the
-// C++ backend (RaceConfig, sensor model, last result) once it exists.
+// Home: the race that's set up, plus live status tiles that open their screen.
 Item {
     id: root
     property string title: "Home"
     property string subtitle: "Race overview"
     signal openScreen(string name)
+
+    // lanes wired up (one-lane mode leaves one out), and how many of those are aligned
+    readonly property int lanesInUse: (backend.laneInUse[0] ? 1 : 0) + (backend.laneInUse[1] ? 1 : 0)
+    readonly property int lanesAligned: (backend.laneInUse[0] && backend.aligned[0] ? 1 : 0)
+                                      + (backend.laneInUse[1] && backend.aligned[1] ? 1 : 0)
 
     ColumnLayout {
         anchors.fill: parent
@@ -84,7 +85,6 @@ Item {
                 }
             }
         }
-        // TODO: this is all fake data this need to be live at one point
         // ---- Status tiles ----
         RowLayout {
             Layout.fillWidth: true
@@ -93,18 +93,26 @@ Item {
 
             NavTile {
                 Layout.fillWidth: true; Layout.fillHeight: true
-                value: "3 / 4"
+                value: backend.connected ? root.lanesAligned + " / " + root.lanesInUse : "--"
                 label: "Sensors"
-                subtitle: "Gates ready"
-                accentColor: Theme.success
+                subtitle: !backend.connected      ? "Firmware not running"
+                        : backend.anySensorFault ? "Sensor fault, tap to see"
+                        : "Lanes aligned"
+                accentColor: !backend.connected      ? Theme.textMuted
+                           : backend.anySensorFault ? Theme.danger
+                           : root.lanesAligned === root.lanesInUse ? Theme.success : Theme.warning
                 onClicked: root.openScreen("sensor")
             }
 
             NavTile {
                 Layout.fillWidth: true; Layout.fillHeight: true
-                value: backend.raceTimes
+                value: !backend.connected  ? "--"
+                     : backend.winner >= 0 ? backend.laneNames[backend.winner]
+                     : backend.raceState
                 label: "Race"
-                subtitle: "Last result"
+                subtitle: backend.winner < 0       ? "Race state"
+                        : backend.showingLastResult ? "Won the last heat"
+                        : "Winner"
                 accentColor: Theme.warning
                 onClicked: root.openScreen("race")
             }

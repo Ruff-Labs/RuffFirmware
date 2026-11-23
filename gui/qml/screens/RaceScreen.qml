@@ -2,17 +2,16 @@ import QtQuick
 import QtQuick.Layouts
 import BoardGui
 
-// Live timing from the firmware (backend, see gui/backend/backend.hpp).
-// The buttons send judge remote commands, same as the Remote screen.
+// Live timing from the firmware. After a heat, its result stays up ("Last heat") until the next
+// heat's lights start. The buttons send the same commands as the judge remote.
 Item {
     id: root
     property string title: "Race"
-    property string subtitle: "Live timing"   // shown under the title in PageHeader
+    property string subtitle: "Live timing"
 
     readonly property bool running: backend.connected && backend.raceState === "Running"
 
-    // ms -> "12.345"; negative (countdown to green) -> "-2.345"
-    function formatTime(ms) {
+    function formatTime(ms) {   // 12345 -> "12.345", -2345 -> "-2.345"
         const t = Math.round(ms)
         const a = Math.abs(t)
         return (t < 0 ? "-" : "") + Math.floor(a / 1000) + "." + ("00" + (a % 1000)).slice(-3)
@@ -23,7 +22,6 @@ Item {
         anchors.margins: Theme.spacingLg
         spacing: Theme.spacingMd
 
-        // Big clock
         Text {
             Layout.alignment: Qt.AlignHCenter
             text: backend.connected ? root.formatTime(backend.clockMs) : "--.---"
@@ -34,12 +32,13 @@ Item {
         }
         Text {
             Layout.alignment: Qt.AlignHCenter
-            text: backend.connected ? backend.raceState : "Firmware not running"
+            text: !backend.connected ? "Firmware not running"
+                  : backend.showingLastResult ? "Last heat  ·  now " + backend.raceState
+                  : backend.raceState
             color: backend.connected ? Theme.textMuted : Theme.danger
             font.pixelSize: Theme.fontSmall
         }
 
-        // Lane results
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -61,11 +60,12 @@ Item {
                         anchors.fill: parent
                         SectionLabel {
                             text: backend.laneNames[modelData.lane] + (won ? "  ·  winner" : "")
+                                  + (backend.laneInUse[modelData.lane] ? "" : "  ·  not wired")
                             color: won ? Theme.success : modelData.color
                         }
                         Item { Layout.fillHeight: true }
                         Text {
-                            text: backend.raceTimes[modelData.lane]   // "--.---", "12.345" or "DNF"
+                            text: backend.raceTimes[modelData.lane]
                             color: Theme.textPrimary
                             font.pixelSize: Theme.fontTitle + 10
                             font.family: "monospace"
@@ -82,7 +82,6 @@ Item {
             }
         }
 
-        // Controls: judge remote commands
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacingMd
@@ -106,8 +105,7 @@ Item {
                 enabled: backend.connected && !root.running
                 onClicked: virtualRemote.press("reset")
             }
-            // head table: new race, also clears false starts + red lights (works mid-heat, on purpose)
-            AppButton {
+            AppButton {   // new race: also clears false starts + red lights; works mid-heat on purpose
                 Layout.fillWidth: true
                 text: "Reset Race"
                 variant: "danger"

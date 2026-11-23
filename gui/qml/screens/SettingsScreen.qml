@@ -3,15 +3,40 @@ import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import BoardGui
 
-// Device settings. Persist these with QtCore's Settings type or a C++ backend.
+// Wi-Fi setup and system info. "Connect" asks the firmware to join the network with nmcli
+// (virtualRemote.setWifi); progress comes back in backend.wifiState / wifiMessage. The board's
+// NetworkManager remembers the network, so there's nothing to save here.
 Item {
     id: root
     property string title: "Settings"
-    property string subtitle: "Network and system "   // shown under the title in PageHeader
+    property string subtitle: "Network and system"
 
-    property alias networkName: networkNameField.text
-    property alias networkPassword: networkPasswordField.text
-    //property alias soundEnabled: soundSwitch.checked
+    property string inputError: ""   // what setWifi() rejected, shown instead of the firmware's message
+    readonly property bool working: backend.wifiState === "working"
+
+    // one labelled text field, styled like the rest of the app
+    component Field: ColumnLayout {
+        property alias label: caption.text
+        property alias text: input.text
+        property alias placeholder: input.placeholderText
+        property alias echoMode: input.echoMode
+        Layout.fillWidth: true
+        spacing: Theme.spacingXs
+        Text { id: caption; color: Theme.textMuted; font.pixelSize: Theme.fontSmall }
+        TextField {
+            id: input
+            Layout.fillWidth: true
+            implicitHeight: Theme.touchTarget
+            color: Theme.textPrimary
+            placeholderTextColor: Theme.textMuted
+            inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+            background: Rectangle {
+                radius: Theme.radius - 4
+                color: Theme.surface
+                border.color: input.activeFocus ? Theme.accent : Theme.border
+            }
+        }
+    }
 
     Flickable {
         anchors.fill: parent
@@ -26,149 +51,114 @@ Item {
             width: parent.width - Theme.spacingLg * 2
             spacing: Theme.spacingSm
 
-            SectionLabel { text: "Network" }
+            // ---- Wi-Fi ----
+            SectionLabel { text: "Wi-Fi" }
             Card {
-                id: networkCard
                 Layout.fillWidth: true
                 padding: Theme.spacingMd
-                implicitHeight: networkForm.implicitHeight + padding * 2
+                implicitHeight: wifiForm.implicitHeight + padding * 2
 
                 ColumnLayout {
-                    id: networkForm
+                    id: wifiForm
                     width: parent.width
                     spacing: Theme.spacingSm
 
                     Text {
-                        text: "Wi-Fi"
+                        Layout.fillWidth: true
+                        text: !backend.connected  ? "Firmware not running: can't change Wi-Fi"
+                            : backend.wifiSsid    ? "On \"" + backend.wifiSsid + "\"" + (backend.ipAddress ? "  ·  " + backend.ipAddress : "")
+                            : "Not on Wi-Fi" + (backend.ipAddress ? "  ·  wired, " + backend.ipAddress : "")
                         color: Theme.textPrimary
                         font.pixelSize: Theme.fontBody
                         font.bold: true
+                        elide: Text.ElideRight
                     }
+
+                    Field { id: ssid; label: "Network name (SSID)"; placeholder: "TrackWiFi" }
+                    Field { id: password; label: "Password"; placeholder: "Blank for an open network"; echoMode: TextInput.Password }
+
                     Text {
-                        text: "Network name and password"
-                        color: Theme.textMuted
+                        text: "Static IP (optional: leave blank for automatic)"
+                        color: Theme.textPrimary
                         font.pixelSize: Theme.fontSmall
-                        Layout.bottomMargin: Theme.spacingXs
-                    }
-
-                    Text { text: "Network name (SSID)"; color: Theme.textMuted; font.pixelSize: Theme.fontSmall }
-                    TextField {
-                        id: networkNameField
-                        Layout.fillWidth: true
-                        implicitHeight: Theme.touchTarget
-                        placeholderText: "Enter Wi-Fi network name"
-                        color: Theme.textPrimary
-                        placeholderTextColor: Theme.textMuted
-                        background: Rectangle {
-                            radius: Theme.radius - 4
-                            color: Theme.surface
-                            border.color: networkNameField.activeFocus ? Theme.accent : Theme.border
-                        }
-                    }
-
-                    Text { text: "Password"; color: Theme.textMuted; font.pixelSize: Theme.fontSmall }
-                    TextField {
-                        id: networkPasswordField
-                        Layout.fillWidth: true
-                        implicitHeight: Theme.touchTarget
-                        placeholderText: "Enter Wi-Fi password"
-                        echoMode: TextInput.Password
-                        color: Theme.textPrimary
-                        placeholderTextColor: Theme.textMuted
-                        background: Rectangle {
-                            radius: Theme.radius - 4
-                            color: Theme.surface
-                            border.color: networkPasswordField.activeFocus ? Theme.accent : Theme.border
-                        }
-                    }
-
-                    Text {
-                        text: "Optional network details"
-                        color: Theme.textPrimary
-                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         Layout.topMargin: Theme.spacingSm
                     }
-                    Text { text: "IP address"; color: Theme.textMuted; font.pixelSize: Theme.fontSmall }
-                    TextField {
+                    RowLayout {
                         Layout.fillWidth: true
-                        implicitHeight: Theme.touchTarget
-                        placeholderText: "Automatic (DHCP)"
-                        color: Theme.textPrimary
-                        placeholderTextColor: Theme.textMuted
-                        background: Rectangle {
-                            radius: Theme.radius - 4
-                            color: Theme.surface
-                            border.color: parent.activeFocus ? Theme.accent : Theme.border
-                        }
+                        spacing: Theme.spacingSm
+                        Field { id: address; label: "IP address"; placeholder: "192.168.1.50/24" }
+                        Field { id: gateway; label: "Gateway"; placeholder: "192.168.1.1" }
+                        Field { id: dns; label: "DNS server"; placeholder: "1.1.1.1" }
                     }
-                    Text { text: "Gateway"; color: Theme.textMuted; font.pixelSize: Theme.fontSmall }
-                    TextField {
+
+                    RowLayout {
                         Layout.fillWidth: true
-                        implicitHeight: Theme.touchTarget
-                        placeholderText: "Optional"
-                        color: Theme.textPrimary
-                        placeholderTextColor: Theme.textMuted
-                        background: Rectangle {
-                            radius: Theme.radius - 4
-                            color: Theme.surface
-                            border.color: parent.activeFocus ? Theme.accent : Theme.border
+                        Layout.topMargin: Theme.spacingSm
+                        spacing: Theme.spacingMd
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.inputError || backend.wifiMessage
+                            color: root.inputError || backend.wifiState === "failed" ? Theme.danger
+                                 : backend.wifiState === "done" ? Theme.success
+                                 : Theme.textMuted
+                            font.pixelSize: Theme.fontSmall
+                            wrapMode: Text.WordWrap
                         }
-                    }
-                    Text { text: "DNS server"; color: Theme.textMuted; font.pixelSize: Theme.fontSmall }
-                    TextField {
-                        Layout.fillWidth: true
-                        implicitHeight: Theme.touchTarget
-                        placeholderText: "Optional"
-                        color: Theme.textPrimary
-                        placeholderTextColor: Theme.textMuted
-                        background: Rectangle {
-                            radius: Theme.radius - 4
-                            color: Theme.surface
-                            border.color: parent.activeFocus ? Theme.accent : Theme.border
+                        AppButton {
+                            text: root.working ? "Connecting..." : "Connect"
+                            variant: "primary"
+                            enabled: backend.connected && !root.working
+                            onClicked: root.inputError = virtualRemote.setWifi(ssid.text, password.text,
+                                                                                address.text, gateway.text, dns.text)
                         }
                     }
                 }
             }
 
-            // ---- Sound ----
-            // SectionLabel { text: "Sound"; Layout.topMargin: Theme.spacingMd }
-            // Card {
-            //     Layout.fillWidth: true
-            //     implicitHeight: 72
-            //     RowLayout {
-            //         anchors.fill: parent
-            //         Text {
-            //             Layout.fillWidth: true
-            //             text: "Start beeps"; color: Theme.textPrimary; font.pixelSize: Theme.fontBody
-            //         }
-            //         Switch { id: soundSwitch; checked: true }
-            //     }
-            // }
-
-            //TODO: make sure that this is linked to the git pull scrip that updates against the repo
             // ---- System ----
             SectionLabel { text: "System"; Layout.topMargin: Theme.spacingMd }
             Card {
                 Layout.fillWidth: true
-                padding: Theme.spacingSm + 4                       // 12px — tweak to match Figma
-                implicitHeight: row.implicitHeight + padding * 2   // grows to fit, like height:auto
+                padding: Theme.spacingSm + 4
+                implicitHeight: systemRow.implicitHeight + padding * 2
                 RowLayout {
-                    id: row
+                    id: systemRow
                     anchors.fill: parent
                     Text {
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignVCenter
-                        text: "Version 0.1.0"; color: Theme.textMuted; font.pixelSize: Theme.fontSmall
+                        text: "GUI " + appVersion + "  ·  Firmware " + (backend.firmwareVersion || "--")
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.fontSmall
+                        elide: Text.ElideRight
                     }
                     AppButton {
                         Layout.alignment: Qt.AlignVCenter
                         text: "Restart"
                         variant: "danger"
-                        onClicked: console.log("TODO: backend restart")
+                        enabled: backend.connected
+                        onClicked: confirmRestart.open()
                     }
                 }
             }
+        }
+    }
+
+    Dialog {
+        id: confirmRestart
+        anchors.centerIn: parent
+        modal: true
+        title: "Restart the race software?"
+        standardButtons: Dialog.Yes | Dialog.Cancel
+        onAccepted: virtualRemote.restartSoftware()
+        Label {
+            width: 360
+            wrapMode: Text.WordWrap
+            color: Theme.textPrimary
+            text: backend.raceActive
+                  ? "A heat is running and will be lost. The screen goes blank for a few seconds."
+                  : "The screen goes blank for a few seconds while the firmware and this app restart."
         }
     }
 }

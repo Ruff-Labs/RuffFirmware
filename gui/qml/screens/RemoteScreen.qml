@@ -8,7 +8,7 @@ import BoardGui
 Item {
     id: root
     property string title: "Remote"
-    property string subtitle: "Virtual judge remote (testing)"   // shown under the title in PageHeader
+    property string subtitle: "Virtual judge remote (testing)"
 
     // one big button per remote command
     component RemoteButton: AppButton {

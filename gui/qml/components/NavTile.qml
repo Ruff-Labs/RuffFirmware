@@ -2,10 +2,8 @@ import QtQuick
 import QtQuick.Layouts
 import BoardGui
 
-// Tappable status tile used on the MainScreen dashboard.
-// Restyled for the sidebar layout: tinted icon chip (instead of a solid
-// block), an optional big `value` so tiles show live info, a faint gradient
-// with a 1px top highlight for depth, and a press-in scale.
+// Tappable status tile on the Home screen: icon chip, an optional big `value` for live info,
+// label + subtitle, and a press-in scale.
 Rectangle {
     id: root
     property string label: ""

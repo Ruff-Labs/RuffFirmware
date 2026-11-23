@@ -1,9 +1,8 @@
 import QtQuick
 import BoardGui
 
-// Rounded panel. Children go inside with their own layout.
-// Premium pass: faint top-to-bottom gradient, softer border and a 1px top
-// highlight, matching NavTile so every surface reads as one system.
+// Rounded panel; children go inside with their own layout. Faint gradient, soft border and a 1px
+// top highlight, matching NavTile.
 Rectangle {
     id: card
     default property alias content: inner.data

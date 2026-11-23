@@ -5,7 +5,7 @@ import BoardGui
 Text {
     color: Theme.textMuted
     font.pixelSize: Theme.fontSmall
-    font.weight: Font.DemiBold          // was bold; lighter weight + wider tracking looks more refined
+    font.weight: Font.DemiBold
     font.capitalization: Font.AllUppercase
     font.letterSpacing: 1.4
 }

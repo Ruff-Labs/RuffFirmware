@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import BoardGui
 
-// Left navigation rail (replaces the old top NavBar).
+// Left navigation rail.
 // Top: brand block. Middle: nav items with one shared sliding indicator.
 // Bottom: compact system status footer.
 Rectangle {
@@ -15,7 +15,6 @@ Rectangle {
     color: Theme.background
     implicitWidth: Theme.sidebarWidth
 
-    // Each entry keeps the accent its screen used on the old tile grid
     readonly property var items: [
         { route: "home",     label: "Home",     accent: Theme.accent },
         { route: "setup",    label: "Setup",    accent: Theme.accent },
@@ -99,8 +98,7 @@ Rectangle {
                 }
             }
 
-            // One indicator for the whole list that slides to the active row.
-            // This motion is the single biggest "premium" cue in the sidebar.
+            // one indicator for the whole list, sliding to the active row
             Rectangle {
                 id: indicator
                 readonly property int barHeight: 20
@@ -119,8 +117,7 @@ Rectangle {
 
         Item { Layout.fillHeight: true }
 
-        // ---- Footer: system status ----
-        // TODO: bind these to the C++ backend (sensor health, firmware version)
+        // ---- Footer: firmware link + sensor health, and the versions ----
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: footer.implicitHeight + Theme.spacingMd
@@ -137,28 +134,38 @@ Rectangle {
                 RowLayout {
                     spacing: Theme.spacingSm
                     Rectangle {   // status LED with a soft halo
+                        id: led
+                        readonly property color tone: !backend.connected      ? Theme.danger
+                                                    : backend.anySensorFault ? Theme.warning
+                                                    : Theme.success
                         Layout.preferredWidth: 8
                         Layout.preferredHeight: 8
                         radius: 4
-                        color: Theme.success
+                        color: led.tone
                         Rectangle {
                             anchors.centerIn: parent
                             width: 16; height: 16; radius: 8
-                            color: Theme.tint(Theme.success, 0.18)
+                            color: Theme.tint(led.tone, 0.18)
                             z: -1
                         }
                     }
                     Text {
-                        text: "System ready"
+                        Layout.fillWidth: true
+                        text: !backend.connected      ? "Firmware not running"
+                            : backend.anySensorFault ? "Sensor fault"
+                            : "System ready"
                         color: Theme.textPrimary
                         font.pixelSize: Theme.fontSmall - 1
                         font.weight: Font.Medium
+                        elide: Text.ElideRight
                     }
                 }
                 Text {
-                    text: "Firmware v0.1.0"
+                    Layout.fillWidth: true
+                    text: "Firmware " + (backend.firmwareVersion || "--")
                     color: Theme.textMuted
                     font.pixelSize: Theme.fontSmall - 2
+                    elide: Text.ElideRight
                 }
             }
         }

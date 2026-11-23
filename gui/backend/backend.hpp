@@ -6,77 +6,106 @@
 #include <QUdpSocket>
 #include <QVariantList>
 
-// GUI side of the firmware -> GUI link. The firmware sends a protocol::RaceStatus packet
-// (UDP, protocol::kGuiPort) every 50 ms and on every state change (StatusSender in the firmware);
-// this keeps the latest one and exposes it to QML as properties, so the screens bind to
-// `backend.clockMs` etc. Packets with the wrong size, magic or version are ignored.
-// Registered in main.cpp as the context property "backend" (same as virtualRemote).
+// Firmware status -> QML. The firmware's StatusSender sends a protocol::RaceStatus (UDP,
+// protocol::kGuiPort) every 50 ms and on every state change; Backend keeps the newest one and
+// exposes it as properties, so screens bind to `backend.clockMs` etc. Registered in main.cpp as
+// the context property "backend".
 //
-// Every property uses the one statusChanged() signal: a packet updates everything at once.
-// Lane properties are 2-item lists: [0] = lane 1 (LEFT), [1] = lane 2 (RIGHT).
+// - Packets with the wrong size, magic or protocol version are ignored (logged once): rebuild
+//   the GUI and firmware from the same commit.
+// - No packet for 1 s -> connected = false, and screens show "Firmware not running".
+// - The last finished heat's result stays visible (showingLastResult) until the next heat's
+//   lights start or the race is reset, instead of vanishing when the firmware moves on.
+// - Every property shares statusChanged(): a packet updates everything at once.
+// - Lane properties are 2-item lists: [0] = lane 1 (LEFT), [1] = lane 2 (RIGHT).
 class Backend : public QObject {
     Q_OBJECT
 
-    // link
-    Q_PROPERTY(bool         connected    READ connected    NOTIFY statusChanged)  // packet in the last 1 s
+    // link + versions
+    Q_PROPERTY(bool         connected         READ connected         NOTIFY statusChanged)
+    Q_PROPERTY(QString      firmwareVersion   READ firmwareVersion   NOTIFY statusChanged)  // "" = not connected
 
-    // timing / race
-    Q_PROPERTY(QString      raceState    READ raceState    NOTIFY statusChanged)  // protocol::race_state_name(): "Idle", "Running", ...
-    Q_PROPERTY(bool         raceActive   READ raceActive   NOTIFY statusChanged)  // a heat is under way (Sequence/Running/FalseStart)
-    Q_PROPERTY(bool         judgeReady   READ judgeReady   NOTIFY statusChanged)
-    Q_PROPERTY(double       clockMs      READ clockMs      NOTIFY statusChanged)  // negative in countdown
-    Q_PROPERTY(int          winner       READ winner       NOTIFY statusChanged)  // -1 none, 0 lane 1, 1 lane 2
+    // race
+    Q_PROPERTY(QString      raceState         READ raceState         NOTIFY statusChanged)  // "Idle", "Running", ... or "Not connected"
+    Q_PROPERTY(bool         raceActive        READ raceActive        NOTIFY statusChanged)  // Sequence / Running / FalseStart
+    Q_PROPERTY(bool         judgeReady        READ judgeReady        NOTIFY statusChanged)
 
-    // sensors: alignment + triggers, per lane
-    Q_PROPERTY(QVariantList aligned      READ aligned      NOTIFY statusChanged)  // bool per lane
-    Q_PROPERTY(QVariantList beamBroken   READ beamBroken   NOTIFY statusChanged)  // bool per lane
+    // results: the last finished heat's while showingLastResult, else live
+    Q_PROPERTY(double       clockMs           READ clockMs           NOTIFY statusChanged)  // negative while counting down to green
+    Q_PROPERTY(bool         showingLastResult READ showingLastResult NOTIFY statusChanged)
+    Q_PROPERTY(int          winner            READ winner            NOTIFY statusChanged)  // -1 none, else lane index
+    Q_PROPERTY(QVariantList splits            READ splits            NOTIFY statusChanged)  // int per lane
+    Q_PROPERTY(QVariantList raceTimes         READ raceTimes         NOTIFY statusChanged)  // "12.345", "DNF" or "--.---" per lane
+    Q_PROPERTY(QVariantList startMs           READ startMs           NOTIFY statusChanged)  // reaction ms per lane, undefined = none
+    Q_PROPERTY(QVariantList falseStarts       READ falseStarts       NOTIFY statusChanged)  // int per lane (always live)
 
-    // results, per lane
-    Q_PROPERTY(QVariantList splits       READ splits       NOTIFY statusChanged)  // int per lane
-    Q_PROPERTY(QVariantList raceTimes    READ raceTimes    NOTIFY statusChanged)  // string per lane: "12.345" or "DNF"
-    Q_PROPERTY(QVariantList startMs      READ startMs      NOTIFY statusChanged)  // double per lane (negative = false start), undefined = none yet
-    Q_PROPERTY(QVariantList falseStarts  READ falseStarts  NOTIFY statusChanged)  // int per lane
+    // sensors, per lane
+    Q_PROPERTY(QVariantList laneInUse         READ laneInUse         NOTIFY statusChanged)  // false = not wired (one-lane mode)
+    Q_PROPERTY(QVariantList aligned           READ aligned           NOTIFY statusChanged)
+    Q_PROPERTY(QVariantList forward           READ forward           NOTIFY statusChanged)  // FORWARD beam broken
+    Q_PROPERTY(QVariantList back              READ back              NOTIFY statusChanged)  // BACK beam broken
+    Q_PROPERTY(QVariantList beamBroken        READ beamBroken        NOTIFY statusChanged)  // FORWARD or BACK
+    Q_PROPERTY(QVariantList sensorFaults      READ sensorFaults      NOTIFY statusChanged)  // "" = fine, else a sentence
+    Q_PROPERTY(bool         anySensorFault    READ anySensorFault    NOTIFY statusChanged)
 
-    // race setup (what the Setup screen last sent, echoed back by the firmware)
-    Q_PROPERTY(QVariantList laneNames    READ laneNames    NOTIFY statusChanged)  // string per lane, "Lane 1" if not set
-    Q_PROPERTY(int          heats        READ heats        NOTIFY statusChanged)  // 0 = not set up
+    // race setup (echoed back by the firmware)
+    Q_PROPERTY(QVariantList laneNames         READ laneNames         NOTIFY statusChanged)  // "Lane 1" if not set
+    Q_PROPERTY(int          heats             READ heats             NOTIFY statusChanged)  // 0 = not set up
 
-    // network
-    Q_PROPERTY(QString      ipAddress    READ ipAddress    NOTIFY networkChanged) // "" = no network
+    // network: this machine's IP, and the firmware's Wi-Fi state
+    Q_PROPERTY(QString      ipAddress         READ ipAddress         NOTIFY networkChanged) // "" = no network
+    Q_PROPERTY(QString      wifiSsid          READ wifiSsid          NOTIFY statusChanged)  // "" = not on Wi-Fi / unknown
+    Q_PROPERTY(QString      wifiState         READ wifiState         NOTIFY statusChanged)  // "idle", "working", "done", "failed"
+    Q_PROPERTY(QString      wifiMessage       READ wifiMessage       NOTIFY statusChanged)
 
 public:
     explicit Backend(QObject* parent = nullptr);
 
-    bool         connected()   const { return connected_; }
-    QString      raceState()   const;
-    bool         raceActive()  const;
-    bool         judgeReady()  const;
-    double       clockMs()     const;
-    int          winner()      const;
-    QVariantList aligned()     const;
-    QVariantList beamBroken()  const;
-    QVariantList splits()      const;
-    QVariantList raceTimes()   const;
-    QVariantList startMs()     const;
-    QVariantList falseStarts() const;
-    QVariantList laneNames()   const;
-    int          heats()       const;
-    QString      ipAddress()   const { return ip_; }
+    bool         connected()         const { return connected_; }
+    QString      firmwareVersion()   const;
+    QString      raceState()         const;
+    bool         raceActive()        const;
+    bool         judgeReady()        const;
+    double       clockMs()           const;
+    bool         showingLastResult() const;
+    int          winner()            const;
+    QVariantList splits()            const;
+    QVariantList raceTimes()         const;
+    QVariantList startMs()           const;
+    QVariantList falseStarts()       const;
+    QVariantList laneInUse()         const;
+    QVariantList aligned()           const;
+    QVariantList forward()           const;
+    QVariantList back()              const;
+    QVariantList beamBroken()        const;
+    QVariantList sensorFaults()      const;
+    bool         anySensorFault()    const;
+    QVariantList laneNames()         const;
+    int          heats()             const;
+    QString      ipAddress()         const { return ip_; }
+    QString      wifiSsid()          const;
+    QString      wifiState()         const;
+    QString      wifiMessage()       const;
 
 signals:
     void statusChanged();
     void networkChanged();
 
 private:
-    void read_packets();       // socket readyRead
-    void on_timeout();         // no packet for 1 s
-    void check_network();      // every few seconds
+    void read_packets();     // socket readyRead: keep the newest valid packet, snapshot finished heats
+    void on_timeout();       // no packet for TIMEOUT_MS
+    void check_network();    // every NETWORK_MS: first non-loopback IPv4 address
 
-    QUdpSocket          socket_;
-    QTimer              timeout_;          // single-shot, restarted by every packet
-    QTimer              network_timer_;
-    protocol::RaceStatus last_{};          // latest packet (all zeros until the first one)
-    bool                connected_ = false;
-    bool                warned_version_ = false;   // say "protocol mismatch" once, not 20x a second
-    QString             ip_;
+    // the packet results come from: the last finished heat while showingLastResult, else the live one
+    const protocol::RaceStatus& results() const;
+
+    QUdpSocket           socket_;
+    QTimer               timeout_;
+    QTimer               network_timer_;
+    protocol::RaceStatus last_{};            // newest packet (zeros until the first one)
+    protocol::RaceStatus result_{};          // last packet seen in Finished
+    bool                 has_result_     = false;
+    bool                 connected_      = false;
+    bool                 warned_version_ = false;
+    QString              ip_;
 };

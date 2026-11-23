@@ -1,9 +1,3 @@
-// SupabaseSync.cpp  —  background upload of race rows to Supabase (CSV stays the backup)
-//
-// enqueue() only adds rows to a queue; a worker thread POSTs them. Rows leave the queue only
-// after a 2xx, so a failed upload is retried (2 s, 4 s, ... up to 60 s apart), never dropped.
-// The highest uploaded race number goes to state_path, and on boot main.cpp re-sends every
-// CSV row after it. Re-sending is harmless: the table's unique key + ignore-duplicates skips them.
 #include "database/SupabaseSync.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -24,8 +18,6 @@ constexpr auto           BACKOFF_MAX    = 60s;
 constexpr long           HTTP_TIMEOUT_S = 10;    // don't hang on bad Wi-Fi
 
 // ---------- config ----------
-// systemd loads these from /etc/ruff/firmware.env (EnvironmentFile in firmware.service).
-// Running by hand: `set -a; source /etc/ruff/firmware.env; set +a` first.
 SyncConfig SyncConfig::from_env() {
     SyncConfig c;
     if (const char* v = std::getenv("SUPABASE_URL")) c.url      = v;
@@ -35,7 +27,6 @@ SyncConfig SyncConfig::from_env() {
     return c;
 }
 
-// ---------- start ----------
 bool SupabaseSync::start(const SyncConfig& cfg) {
     if (thread_.joinable()) return true;   // already running
     if (!cfg.enabled()) {
@@ -53,8 +44,6 @@ bool SupabaseSync::start(const SyncConfig& cfg) {
     return true;
 }
 
-// ---------- enqueue ----------
-// Called from the race loop: only takes the lock for a copy, never touches the network.
 void SupabaseSync::enqueue(const std::vector<RaceRow>& rows) {
     if (rows.empty()) return;
     {
@@ -129,26 +118,25 @@ static void json_string_or_null(std::string& out, const std::string& s) {
     else           json_string(out, s);
 }
 
-// one object per row; keys = the columns in docs/supabase-schema.md
-static std::string rows_to_json(const std::vector<RaceRow>& rows, const std::string& board_id) {
+std::string rows_to_json(const std::vector<RaceRow>& rows, const std::string& board_id) {
     std::string body = "[";
     for (size_t i = 0; i < rows.size(); ++i) {
         const RaceRow& r = rows[i];
         if (i) body += ',';
-        body += "{\"board_id\":";      json_string(body, board_id);
-        body += ",\"heat\":"           + std::to_string(r.heat);
-        body += ",\"race\":"           + std::to_string(r.race);
-        body += ",\"lane\":";          json_string(body, r.lane);
-        body += ",\"start_time\":";    json_string_or_null(body, r.start_time);
+        body += "{\"board_id\":"; json_string(body, board_id);
+        body += ",\"heat\":" + std::to_string(r.heat);
+        body += ",\"race\":" + std::to_string(r.race);
+        body += ",\"lane\":"; json_string(body, r.lane);
+        body += ",\"start_time\":"; json_string_or_null(body, r.start_time);
         body += ",\"splits_ms\":[";
         for (size_t s = 0; s < r.splits_ms.size(); ++s) {
             char buf[32];
             std::snprintf(buf, sizeof buf, "%s%.3f", s ? "," : "", r.splits_ms[s]);
             body += buf;
         }
-        body += "],\"race_time\":";    json_string_or_null(body, r.race_time);
-        body += ",\"modified_at\":";   json_string_or_null(body, r.modified);
-        body += ",\"operator\":";      json_string_or_null(body, r.user);
+        body += "],\"race_time\":"; json_string_or_null(body, r.race_time);
+        body += ",\"modified_at\":"; json_string_or_null(body, r.modified);
+        body += ",\"operator\":"; json_string_or_null(body, r.user);
         if (r.start_ms) {
             char buf[32];
             std::snprintf(buf, sizeof buf, ",\"start_ms\":%.3f", *r.start_ms);
@@ -161,8 +149,8 @@ static std::string rows_to_json(const std::vector<RaceRow>& rows, const std::str
             if (e) body += ',';
             body += r.early_pass[e] ? "true" : "false";
         }
-        body += "],\"winner\":";       body += r.winner ? "true" : "false";
-        body += ",\"false_starts\":"   + std::to_string(r.false_starts);
+        body += "],\"winner\":"; body += r.winner ? "true" : "false";
+        body += ",\"false_starts\":" + std::to_string(r.false_starts);
         body += '}';
     }
     return body + ']';
@@ -174,7 +162,6 @@ static size_t collect_body(char* data, size_t size, size_t n, void* user) {
     return size * n;
 }
 
-// ---------- HTTP POST ----------
 bool SupabaseSync::post_rows(const std::vector<RaceRow>& rows) {
     const std::string body = rows_to_json(rows, cfg_.board_id);
     const std::string url  = cfg_.url + "/rest/v1/race_results?on_conflict=board_id,race,lane";
@@ -238,8 +225,7 @@ int SupabaseSync::last_synced_race() const {
     return n > 0 ? n : 0;
 }
 
-// Atomic: write a temp file, fsync it, then rename over the old one, so a power cut leaves
-// either the old number or the new one, never half a number.
+// temp file + fsync + rename: a power cut leaves the old number or the new one, never half of one
 void SupabaseSync::save_last_synced(int race) {
     if (race <= last_synced_race()) return;   // only ever moves forward
     const std::string tmp  = cfg_.state_path + ".tmp";
@@ -257,7 +243,6 @@ void SupabaseSync::save_last_synced(int race) {
         std::fprintf(stderr, "supabase: can't save %s: %s\n", cfg_.state_path.c_str(), std::strerror(err));
 }
 
-// ---------- stop ----------
 void SupabaseSync::stop() {
     if (!thread_.joinable()) return;   // never started, or already stopped
     {
@@ -267,5 +252,4 @@ void SupabaseSync::stop() {
     cv_.notify_all();
     thread_.join();                    // waits for a POST in progress (at most HTTP_TIMEOUT_S)
     curl_global_cleanup();
-    // anything still queued is fine to drop: it's in the CSV, and the boot catch-up resends it
 }

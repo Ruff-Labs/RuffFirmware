@@ -1,12 +1,3 @@
-// Database.cpp  —  saves race results to a CSV file (same format as the old Python UFLI_races.csv)
-// The CSV is the local backup. After a race is saved here, the same rows are uploaded to
-// Supabase by SupabaseSync; if the network is down they're resent later from this file.
-//
-// Columns: the old tool's 17, then StartMs, EarlyPasses, Winner, FalseStarts (see Database.hpp).
-//
-// Power can be cut at the track, so every race (both lane rows) goes to disk in ONE write
-// followed by fsync(). After a power cut the worst case is a partial last line, which the
-// reader skips and open() steps past.
 #include "database/Database.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -19,13 +10,13 @@
 #include <fstream>
 #include <stdexcept>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/timex.h>
+#endif
 
 // ---------- settings ----------
-// Relative to the working directory, which firmware.service sets to the repo clone
-// (on the board's eMMC/SD card, so it survives reboots).
 constexpr const char* DEFAULT_DB_PATH = "data/UFLI_races.csv";
 
-// The old Python tool's 17 columns, then the 4 added by the firmware (see Database.hpp).
 #define OLD_COLUMNS_HEADER                                  \
     "Heatnumber,Racenumber,Lane,StartTime,FirstPass,"       \
     "Dog1,Dog2,Dog3,Dog4,Dog5,Dog6,Dog7,Dog8,Dog9,"         \
@@ -54,8 +45,19 @@ static const char* SPLIT_NAME[MAX_DOGS] = {
 static const char* LANE_NAME[NUM_LANES] = { "Left", "Right" };
 
 // ---------- helpers ----------
+// Has NTP set the wall clock? The board has no RTC battery and firmware.service doesn't wait for
+// the network, so until then it's whatever was restored at boot (usually stale, not 1970).
+// adjtimex() with no modes only reads the sync status.
+static bool wall_clock_synced() {
+#ifdef __linux__
+    timex tx{};
+    return adjtimex(&tx) != TIME_ERROR;
+#else
+    return true;   // laptop builds (unit tests): the OS keeps the clock set
+#endif
+}
+
 // "YYYY-MM-DD HH:MM:SS" like the old CSV (Postgres also accepts it for timestamptz).
-// The board has no RTC battery; firmware.service waits for NTP (time-sync.target) so this isn't 1970.
 static std::string format_wall_time(std::chrono::system_clock::time_point tp) {
     const std::time_t t = std::chrono::system_clock::to_time_t(tp);
     std::tm tm{};
@@ -132,7 +134,6 @@ static std::vector<std::string> split_csv(const std::string& line) {
 }
 
 // false for a malformed line (wrong column count, bad number, half-written by a power cut).
-// Rows from the old Python tool (17 columns) are read too; their added fields stay at the defaults.
 static bool parse_row(const std::string& line, RaceRow& row) {
     const std::vector<std::string> f = split_csv(line);
     if (int(f.size()) != CSV_COLUMNS && int(f.size()) != OLD_COLUMNS) return false;
@@ -216,7 +217,6 @@ static bool ends_with_newline(const std::string& path) {
     return c == '\n';
 }
 
-// ---------- open ----------
 bool Database::open(const std::string& path) {
     namespace fs = std::filesystem;
     path_     = path.empty() ? DEFAULT_DB_PATH : path;
@@ -239,7 +239,6 @@ bool Database::open(const std::string& path) {
     if (!first.empty() && first.back() == '\r') first.pop_back();
 
     if (first.empty()) {
-        // new or empty file: header first
         if (!append_durable(path_, std::string(CSV_HEADER) + '\n')) return false;
     } else {
         if (first == OLD_HEADER)
@@ -248,7 +247,7 @@ bool Database::open(const std::string& path) {
                                  "fresh one with the full header.\n", path_.c_str());
         else if (first != CSV_HEADER)
             std::fprintf(stderr, "database: warning: %s has an unexpected header, appending anyway\n", path_.c_str());
-        // a power cut mid-write can leave a partial last line: start the next race on a fresh line
+        // a power cut mid-write can leave a partial last line
         if (!ends_with_newline(path_) && !append_durable(path_, "\n")) return false;
         for_each_row(path_, [this](const RaceRow& r) { max_race_ = std::max(max_race_, r.race); });
     }
@@ -258,13 +257,10 @@ bool Database::open(const std::string& path) {
     return true;
 }
 
-// ---------- race number ----------
-// Same as next_race_number() in the old Python: max(Racenumber) + 1, cached instead of re-reading the file.
 int Database::next_race_number() {
     return max_race_ + 1;
 }
 
-// ---------- save ----------
 bool Database::save_race(const RaceRecord& rec, std::vector<RaceRow>* saved) {
     if (!is_open_ || !rec.timer) return false;
 
@@ -273,11 +269,13 @@ bool Database::save_race(const RaceRecord& rec, std::vector<RaceRow>* saved) {
     std::replace(user.begin(), user.end(), '\n', ' ');
     std::replace(user.begin(), user.end(), '\r', ' ');
 
+    if (!wall_clock_synced())
+        std::fprintf(stderr, "database: warning: clock not synced by NTP yet (no network?), race %d's "
+                             "StartTime/ModifiedDate may be wrong\n", rec.race);
     const std::string started  = format_wall_time(rec.timer->wall_start());
     const std::string modified = format_wall_time(std::chrono::system_clock::now());
 
-    // Build both lane rows first, then write them in one go so a race is never half-saved.
-    // The RaceRows hold the exact same values as the CSV, so Supabase gets what the backup has.
+    // both lane rows first, then one write; the RaceRows hold exactly what the CSV gets
     std::vector<RaceRow> rows;
     std::string out;
     for (int l = 0; l < NUM_LANES; ++l) {
@@ -291,8 +289,6 @@ bool Database::save_race(const RaceRecord& rec, std::vector<RaceRow>* saved) {
             row.splits_ms.push_back(L.splits_ms[i]);
             row.early_pass.push_back(L.early_pass[i]);
         }
-        // a false start doesn't forfeit (it shows as a negative start_ms), so the only
-        // non-time value is DNF: fewer than MIN_EXCHANGES passes when the judge pressed STOP
         const double ms = rec.timer->race_ms(l);
         row.race_time = (ms == RACE_DNF) ? "DNF" : format_ms(ms);
         row.modified  = modified;
@@ -322,8 +318,6 @@ bool Database::save_race(const RaceRecord& rec, std::vector<RaceRow>* saved) {
     return true;
 }
 
-// ---------- read back ----------
-// Last n rows, for the GUI results screen.
 std::vector<RaceRow> Database::recent(int n) {
     std::deque<RaceRow> last;
     if (n <= 0) return {};
@@ -334,8 +328,6 @@ std::vector<RaceRow> Database::recent(int n) {
     return { last.begin(), last.end() };
 }
 
-// Rows with Racenumber > race, in file order. Called once at boot with
-// SupabaseSync::last_synced_race(), so races saved while offline or before a power cut get uploaded.
 std::vector<RaceRow> Database::rows_after(int race) {
     std::vector<RaceRow> rows;
     for_each_row(path_, [&](const RaceRow& r) {
@@ -344,8 +336,6 @@ std::vector<RaceRow> Database::rows_after(int race) {
     return rows;
 }
 
-// ---------- close ----------
-// Every save opens, fsyncs and closes the file itself, so there's nothing to flush here.
 void Database::close() {
     is_open_ = false;
 }

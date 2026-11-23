@@ -17,7 +17,8 @@ find_package(Threads REQUIRED)
 add_executable(firmware
     src/main.cpp
     src/gui_link/StatusSender.cpp
-    src/eventFlags.cpp
+    src/sensors/SensorHealth.cpp
+    src/system/SystemControl.cpp
     src/database/Database.cpp
     src/database/SupabaseSync.cpp
     src/light_tree/LightTree.cpp

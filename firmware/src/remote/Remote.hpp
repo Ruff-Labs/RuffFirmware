@@ -5,56 +5,68 @@
 #include <cstdint>
 #include <optional>
 
-// Judge remote: READY / START / STOP / RESET / ABORT.
-// Presses come from two places, handled the same way:
-//   - the RF receiver: one GPIO line per button (pins in Remote.cpp), with debounce + lockout
-//   - the GUI's virtual remote (VirtualRemote.hpp), for testing without the receiver
-// What each button does:
-//   READY  toggles judge_ready (it stays on; Ready drops back to Idle if it goes off)
-//   START  starts the light sequence (only in Ready)
-//   STOP   stops the race clock (only in Running)
-//   RESET  judge_ack: clears the Finished screen early
-//   ABORT  sends any race state to Reset
+// Judge remote, plus the GUI's head-table commands. Presses come from two places and are
+// handled the same way, so the state machine can't tell them apart:
+//   - the RF receiver: one GPIO line per button (pins in Remote.cpp), debounced, with a lockout
+//   - the GUI (VirtualRemote): the Remote screen's buttons, and head-table commands
+//
+//   READY      toggles judge_ready (a level: Ready drops back to Idle when it goes off)
+//   START      starts the light sequence (only in Ready)
+//   STOP       stops the race clock (only in Running)
+//   RESET      judge_ack: leaves the Finished screen early
+//   ABORT      any race state -> Reset (Reset Heat)
+//   GUI only:  ResetRace, SetupRace (lane names + heats), SetWifi, Restart
+//
+// TODO: fill in the receiver's chip + pins (Remote.cpp). Until then begin() returns false and
+//       only the GUI works. Then bench test: exactly one event per press (fast taps, long hold, range).
+// TODO: rules questions: should RESET in Idle/Ready also clear READY? Only 3 buttons on the remote?
+//       Then drop ABORT and make "hold RESET 2 s" = abort, in on_release().
 
-// Ready..Abort are the judge remote's buttons; ResetRace and SetupRace only come from the GUI
-// (head table), over the same link as the virtual remote.
-enum class RemoteCmd { None, Ready, Start, Stop, Reset, Abort, ResetRace, SetupRace };
+enum class RemoteCmd { None, Ready, Start, Stop, Reset, Abort, ResetRace, SetupRace, SetWifi, Restart };
 
-// What the remote hands to the state machine each tick.
-// poll_inputs() copies these into RaceInputs.
+// What the remote hands the state machine each tick (poll_inputs() copies it into RaceInputs).
+// Everything except judge_ready is a one-shot: true / set for exactly one tick.
 struct RemoteInputs {
-    bool judge_ready   = false;   // level: stays true until toggled off or cleared
-    bool start_pressed = false;   // one-shot: true for a single tick
-    bool stop_pressed  = false;   // one-shot: judge stops the race clock (Lee's button 2)
-    uint64_t t_stop_ns = 0;       // kernel timestamp of that press, handed to Timer::stop()
-    bool judge_ack     = false;   // one-shot
-    bool abort         = false;   // one-shot
-    bool reset_race    = false;   // one-shot, from the GUI: new race, clears false starts too
-    std::optional<protocol::RaceSetup> setup;   // one-shot, from the GUI's Setup screen
+    bool     judge_ready   = false;   // level: stays true until toggled off or clear_ready()
+    bool     start_pressed = false;
+    bool     stop_pressed  = false;
+    uint64_t t_stop_ns     = 0;       // kernel timestamp of the STOP press, for Timer::stop()
+    bool     judge_ack     = false;
+    bool     abort         = false;
+    bool     reset_race    = false;
+    std::optional<protocol::RaceSetup>  setup;
+    std::optional<protocol::WifiConfig> wifi;
+    bool     restart       = false;
 };
 
 class Remote {
 public:
-    bool begin();                 // request GPIO lines (+ start the GUI's virtual remote); false if GPIO failed
-    RemoteInputs poll();          // non-blocking, call once per loop tick
-    void clear_ready();           // call from RaceState::Reset so the next race isn't pre-armed
+    // Starts the GUI link, then requests the receiver's GPIO lines. False if the GPIO part
+    // failed: the GUI's buttons still work.
+    bool begin();
+
+    // Non-blocking; call once per tick.
+    RemoteInputs poll();
+
+    // Drop READY, so the next heat isn't pre-armed. Called by Reset / Reset Race.
+    void clear_ready();
 
 private:
     struct Button {
-        unsigned  line;           // GPIO line offset
-        RemoteCmd cmd;            // what this button means
-        bool      down      = false;  // currently held?
-        uint64_t  t_last_ns = 0;      // last accepted press (for lockout)
+        unsigned  line;
+        RemoteCmd cmd;
+        bool      down      = false;   // held: fire once per press
+        uint64_t  t_last_ns = 0;       // last accepted press, for the lockout
     };
 
     void on_press(Button& b, uint64_t t_ns, RemoteInputs& out);
     void on_release(Button& b, uint64_t t_ns, RemoteInputs& out);
-    void apply(RemoteCmd cmd, uint64_t t_ns, RemoteInputs& out);   // what a button does (real or virtual)
+    void apply(RemoteCmd cmd, uint64_t t_ns, RemoteInputs& out);   // what a command does
     Button* find(unsigned line);
 
-    std::array<Button, 5>              buttons_;   // one per physical button (Ready..Abort)
+    std::array<Button, 5>              buttons_;   // the physical buttons, Ready..Abort
     std::optional<gpiod::line_request> req_;
     gpiod::edge_event_buffer           buf_{16};
-    bool ready_latched_ = false;
-    VirtualRemote virtual_;       // GUI buttons, for testing without the receiver
+    bool                               ready_latched_ = false;
+    VirtualRemote                      virtual_;
 };

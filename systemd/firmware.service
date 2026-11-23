@@ -1,9 +1,10 @@
 [Unit]
 Description=Board firmware (sensors, light tree, remote, race DB)
-# Race results are timestamped and the board has no RTC battery, so wait for NTP
-# to set the clock (otherwise dates in data/UFLI_races.csv come out as 1970)
-Wants=time-sync.target network-online.target
-After=time-sync.target network-online.target
+# Deliberately NOT waiting for network-online / time-sync: at a track with no Wi-Fi that
+# would hold the race system up for minutes. Nothing here needs the network to start:
+# Supabase uploads retry in the background, and the race clock is monotonic (not wall time).
+# The wall clock (CSV dates) is whatever the board restored at boot until NTP syncs it;
+# the firmware logs a warning for every race saved before that (Database.cpp).
 
 [Service]
 # Runs as root for now: sensors, light tree and remote all open /dev/gpiochip*

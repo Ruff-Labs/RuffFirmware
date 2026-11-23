@@ -1,4 +1,3 @@
-// StatusSender.cpp  —  race status to the GUI over UDP (see StatusSender.hpp)
 #include "gui_link/StatusSender.hpp"
 #include <arpa/inet.h>
 #include <cerrno>

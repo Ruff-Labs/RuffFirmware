@@ -1,36 +1,33 @@
 #pragma once
 #include <common/protocol.h>
 #include <cstdint>
-#include <arpa/inet.h>
-#include <cerrno>
-#include <cstdio>
-#include <cstring>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <time.h>
-#include <unistd.h>
 
-enum class RemoteCmd;   // defined in Remote.hpp
+enum class RemoteCmd;   // Remote.hpp
 
-// Virtual remote: button presses from the GUI instead of the RF receiver.
-// For testing the rest of the firmware before the receiver is wired up.
+// The GUI -> firmware link: UDP on protocol::kRemotePort, one packet per command (a
+// protocol::Command byte, or a SetupPacket / WifiPacket). Remote owns one and feeds its commands
+// through the same code as the RF buttons. Bound to any address, so a laptop GUI can drive the
+// board too (anyone on the board's network can, so keep the board on the event's own network).
 //
-// The GUI sends one UDP packet per press (one protocol::Command byte) to protocol::kRemotePort.
-// Remote owns one of these and feeds its presses through the same code as the real buttons,
-// so the state machine can't tell the difference. The same link also carries the head-table
-// commands (Reset Race, and a protocol::SetupPacket from the Setup screen).
-//
-// TODO: delete this (and the GUI's Remote screen) once the real receiver works,
-//       or keep it as a backup remote for the head table.
+// The judge-remote buttons here are for testing until the RF receiver works; then keep them as
+// a backup remote or remove them (and the GUI's Remote screen). Head-table commands stay.
 class VirtualRemote {
 public:
-    ~VirtualRemote();
-    bool begin(uint16_t port = protocol::kRemotePort);   // open the UDP socket; false on failure
+    // What came with a SetupRace / SetWifi command
+    struct Payload {
+        protocol::RaceSetup  setup;
+        protocol::WifiConfig wifi;
+    };
 
-    // Non-blocking. Returns the next waiting press (and when it arrived) or false if none.
-    // For RemoteCmd::SetupRace, `setup` holds the lane names + heats. Call in a loop until false.
-    bool next(RemoteCmd& cmd, uint64_t& t_ns, protocol::RaceSetup& setup);
+    ~VirtualRemote();
+
+    // Opens the non-blocking UDP socket. False (logged) on failure: no GUI commands then.
+    bool begin(uint16_t port = protocol::kRemotePort);
+
+    // The next waiting command and its arrival time (CLOCK_MONOTONIC ns, like the sensors), or
+    // false if none. Packets of the wrong size are logged and skipped, and every string is
+    // 0-terminated whatever the sender did. Non-blocking: call in a loop until it returns false.
+    bool next(RemoteCmd& cmd, uint64_t& t_ns, Payload& payload);
 
 private:
     int fd_ = -1;

@@ -11,7 +11,8 @@ sudo apt install -y \
     libcurl4-openssl-dev \
     qt6-base-dev qt6-declarative-dev qt6-qpa-plugins \
     qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
-    qml6-module-qtquick-templates qml6-module-qtqml-workerscript
+    qml6-module-qtquick-templates qml6-module-qtqml-workerscript \
+    qml6-module-qtquick-virtualkeyboard qt6-virtualkeyboard-plugin
 
 # Supabase settings (optional; without this file the firmware saves to CSV only)
 if [ ! -f /etc/ruff/firmware.env ]; then

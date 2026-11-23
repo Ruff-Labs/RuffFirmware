@@ -20,5 +20,10 @@ Short version:
   on a laptop as on the board.
 - On the board it draws straight to the display with `QT_QPA_PLATFORM=eglfs` (set in
   `systemd/gui.service`). If the screen stays black, switch it to `linuxfb`.
+- With eglfs/linuxfb, text fields get Qt's on-screen keyboard (`qml/KeyboardPanel.qml`). To try
+  it on a laptop: `RUFF_ONSCREEN_KEYBOARD=1`.
+- The GUI talks to the firmware over UDP (`common/include/common/protocol.h`): `backend` gets
+  its status, `virtualRemote` sends commands. Without the firmware running, screens show
+  "Firmware not running".
 
 
