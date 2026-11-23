@@ -1,3 +1,17 @@
+find_package(Threads REQUIRED)
+set(RADIO_INCLUDE ${PROJECT_SOURCE_DIR}/nano/include)   # radio_protocol.h, shared with the Nano sketches
+
+# Watches the sensor radio link on its own (no GPIO needed, so it also builds on a Mac)
+add_executable(radio_monitor
+    src/radio/radio_monitor.cpp
+    src/radio/RadioSensors.cpp
+    src/radio/SerialLink.cpp
+    src/radio/ClockFit.cpp
+    src/sensors/SensorEvents.cpp
+)
+target_include_directories(radio_monitor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${RADIO_INCLUDE})
+target_link_libraries(radio_monitor PRIVATE Threads::Threads)
+
 # libgpiod v2 C++ bindings (apt: libgpiod-dev, Debian 13+)
 # Linux-only, so on macOS the hardware targets are skipped and the rest of the project still configures
 find_package(PkgConfig)
@@ -12,7 +26,6 @@ endif()
 
 # Supabase upload (apt: libcurl4-openssl-dev)
 find_package(CURL REQUIRED)
-find_package(Threads REQUIRED)
 
 add_executable(firmware
     src/main.cpp
@@ -25,11 +38,15 @@ add_executable(firmware
     src/remote/Remote.cpp
     src/remote/VirtualRemote.cpp
     src/sensors/SensorEvents.cpp
+    src/sensors/GpioSensors.cpp
+    src/radio/RadioSensors.cpp
+    src/radio/SerialLink.cpp
+    src/radio/ClockFit.cpp
     src/state_machine/state_machine.cpp
     src/timer/Timer.cpp
 )
 
-target_include_directories(firmware PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(firmware PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${RADIO_INCLUDE})
 target_link_libraries(firmware PRIVATE PkgConfig::GPIOD CURL::libcurl Threads::Threads common)
 
 # Separate test program for the light tree

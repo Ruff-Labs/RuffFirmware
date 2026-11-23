@@ -58,3 +58,12 @@ TEST(status_reports_sensors_version_and_network) {
     CHECK(std::string(s.wifi_ssid) == "Track");
     CHECK(s.version == protocol::kProtocolVersion);
 }
+
+TEST(health_offline_wins_over_other_faults) {
+    SensorHealth h;
+    h.update(0, true, true, true, T0);
+    h.set_online(false);
+    CHECK(h.fault(0, T0 + 1s) == SensorFault::Offline);
+    h.set_online(true);
+    CHECK(h.fault(0, T0 + 1s) == SensorFault::Wiring);
+}

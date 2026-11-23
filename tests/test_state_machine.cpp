@@ -11,7 +11,7 @@ using namespace std::chrono_literals;
 struct Rig {
     TempDir      dir;
     LightTree    tree;
-    Sensors      sensors;
+    FakeSensors  sensors;
     Remote       remote;
     Timer        timer;
     Database     db;
@@ -322,7 +322,7 @@ TEST(sm_setup_is_ignored_mid_heat) {
     CHECK(r.m.setup.lane_names[LEFT][0] == '\0');
 }
 
-// ---------- one-lane mode (lane disabled in LANE_PINS) ----------
+// ---------- one-lane mode (lane disabled in LANE_ENABLED) ----------
 TEST(sm_one_lane_mode_starts_without_the_disabled_lane) {
     Rig r;
     fake().lane_enabled[RIGHT] = false;
@@ -349,4 +349,26 @@ TEST(sm_no_lanes_enabled_never_gets_ready) {
     fake().lane_enabled[LEFT] = fake().lane_enabled[RIGHT] = false;
     r.align(true, true); fake().ready_latched = true; r.step(5);
     CHECK(r.m.state == RaceState::Idle);
+}
+
+// ---------- sensor radio link down ----------
+TEST(sm_sensors_offline_blocks_ready) {
+    Rig r;
+    fake().sensors_online = false;
+    r.align(true, true); fake().ready_latched = true; r.step(5);
+    CHECK(r.m.state == RaceState::Idle);        // stale levels can't start a heat
+    CHECK(!r.in.lane_aligned[LEFT]);
+    fake().sensors_online = true;
+    r.step(2);
+    CHECK(r.m.state == RaceState::Ready);
+}
+
+TEST(sm_passes_still_count_while_sensors_offline) {
+    Rig r;
+    r.ready(); r.start(); r.go_green();
+    r.advance_to_ms_after_green(200); r.dog(LEFT);   // start dog
+    fake().sensors_online = false;              // link drops mid-heat; buffered passes arrive late
+    r.advance_to_ms_after_green(4000); r.dog(LEFT);
+    CHECK(r.timer.lane(LEFT).n_splits == 1);
+    CHECK(r.m.state == RaceState::Running);
 }

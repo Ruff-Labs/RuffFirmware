@@ -47,6 +47,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList beamBroken        READ beamBroken        NOTIFY statusChanged)  // FORWARD or BACK
     Q_PROPERTY(QVariantList sensorFaults      READ sensorFaults      NOTIFY statusChanged)  // "" = fine, else a sentence
     Q_PROPERTY(bool         anySensorFault    READ anySensorFault    NOTIFY statusChanged)
+    Q_PROPERTY(bool         sensorsOffline    READ sensorsOffline    NOTIFY statusChanged)   // radio link down
 
     // race setup (echoed back by the firmware)
     Q_PROPERTY(QVariantList laneNames         READ laneNames         NOTIFY statusChanged)  // "Lane 1" if not set
@@ -80,6 +81,7 @@ public:
     QVariantList beamBroken()        const;
     QVariantList sensorFaults()      const;
     bool         anySensorFault()    const;
+    bool         sensorsOffline()    const;
     QVariantList laneNames()         const;
     int          heats()             const;
     QString      ipAddress()         const { return ip_; }

@@ -96,6 +96,7 @@ Item {
                 value: backend.connected ? root.lanesAligned + " / " + root.lanesInUse : "--"
                 label: "Sensors"
                 subtitle: !backend.connected      ? "Firmware not running"
+                        : backend.sensorsOffline ? "Sensor unit offline"
                         : backend.anySensorFault ? "Sensor fault, tap to see"
                         : "Lanes aligned"
                 accentColor: !backend.connected      ? Theme.textMuted

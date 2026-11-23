@@ -264,14 +264,18 @@ void race_tick(RaceMachine& m, const RaceInputs& in, LightTree& tree, Sensors& s
 // ---------- input polling ----------
 void poll_inputs(Sensors& sensors, Remote& remote, RaceInputs& in) {
     sensors.poll();
+    // Offline, the last levels may be stale: nothing counts as aligned (so no heat can start) or
+    // as broken. Edges and passes still count: they carry their own times and arrive late.
+    in.sensors_online = sensors.online();
     for (int lane : { LEFT, RIGHT }) {
         const LaneSignals& s = sensors.lane(lane);
+        const bool live = in.sensors_online;
         in.lane_in_use[lane]  = sensors.enabled(lane);
-        in.lane_aligned[lane] = s.high[ALIGN];
-        in.forward_high[lane] = s.high[FORWARD];
-        in.back_high[lane]    = s.high[BACK];
+        in.lane_aligned[lane] = live && s.high[ALIGN];
+        in.forward_high[lane] = live && s.high[FORWARD];
+        in.back_high[lane]    = live && s.high[BACK];
         // rose[] catches a break that started and ended within one tick
-        in.beam_broken[lane]  = s.high[FORWARD] || s.high[BACK] || s.rose[FORWARD] || s.rose[BACK];
+        in.beam_broken[lane]  = in.forward_high[lane] || in.back_high[lane] || s.rose[FORWARD] || s.rose[BACK];
         in.t_break[lane]      = (s.high[FORWARD] || s.rose[FORWARD]) ? s.t_rise[FORWARD] : s.t_rise[BACK];
         in.lane_pass[lane]    = s.passed;
         in.t_pass[lane]       = s.t_pass;
@@ -352,6 +356,7 @@ void run_race(LightTree& tree, Sensors& sensors, Remote& remote,
         const auto now = Clock::now();
         race_tick(m, in, tree, sensors, remote, timer, db, sync, now);
 
+        health.set_online(in.sensors_online);
         for (int lane : { LEFT, RIGHT })
             health.update(lane, in.lane_aligned[lane], in.forward_high[lane], in.back_high[lane], now);
         if (in.wifi)    sys.set_wifi(*in.wifi);

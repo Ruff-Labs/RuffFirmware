@@ -15,6 +15,7 @@ void SensorHealth::update(int lane, bool align, bool forward, bool back, Clock::
 protocol::SensorFault SensorHealth::fault(int lane, Clock::time_point now) const {
     using protocol::SensorFault;
     if (lane < 0 || lane >= NUM_LANES) return SensorFault::None;
+    if (!online_) return SensorFault::Offline;
 
     const auto held = [now](const Held& h, Clock::duration d) { return h.on && now - h.since >= d; };
     if (held(all_three_[lane], WIRING_AFTER)) return SensorFault::Wiring;

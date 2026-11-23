@@ -14,7 +14,7 @@ constexpr uint16_t kGuiPort    = 5555;   // firmware -> GUI: RaceStatus
 constexpr uint16_t kRemotePort = 5556;   // GUI -> firmware: Command, SetupPacket, WifiPacket
 
 constexpr uint32_t kStatusMagic     = 0x46465552;   // "RUFF"
-constexpr uint8_t  kProtocolVersion = 2;
+constexpr uint8_t  kProtocolVersion = 3;
 
 constexpr int    kNumLanes    = 2;      // [0] = lane 1 (LEFT), [1] = lane 2 (RIGHT)
 constexpr int    kLaneNameLen = 32;     // bytes incl. the terminating 0 (UTF-8)
@@ -57,6 +57,7 @@ enum class SensorFault : uint8_t {
     None,
     Blocked,   // FORWARD or BACK broken for 10 s+: something in the beam, or a stuck sensor
     Wiring,    // ALIGN, FORWARD and BACK all active at once: can't happen with a working sensor
+    Offline,   // no radio contact with the sensor node (or the base station isn't plugged in)
 };
 
 // Progress of the last Wi-Fi change from the Settings screen.

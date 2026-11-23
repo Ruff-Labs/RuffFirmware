@@ -59,8 +59,9 @@ struct RaceInputs {
     std::optional<protocol::WifiConfig> wifi;    // GUI Settings -> SystemControl (not the race)
     bool     restart       = false;              // GUI Settings -> SystemControl
 
-    // sensors, per lane
-    bool     lane_in_use[2]  = { true, true };   // enabled in LANE_PINS
+    // sensors
+    bool     sensors_online  = true;             // false = radio link down: levels read as clear/unaligned
+    bool     lane_in_use[2]  = { true, true };   // enabled in LANE_ENABLED
     bool     lane_aligned[2] = {};               // ALIGN high
     bool     beam_broken[2]  = {};               // FORWARD or BACK broken now or during the tick
     bool     forward_high[2] = {};               // levels, for the GUI and SensorHealth

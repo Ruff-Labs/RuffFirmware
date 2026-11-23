@@ -167,10 +167,18 @@ QVariantList Backend::sensorFaults() const {
         switch (connected_ ? SensorFault(last_.sensor_fault[l]) : SensorFault::None) {
             case SensorFault::Blocked: out << QStringLiteral("Beam blocked for 10 s+: something in the way, or a stuck sensor"); break;
             case SensorFault::Wiring:  out << QStringLiteral("All three signals on at once: check the sensor wiring"); break;
+            case SensorFault::Offline: out << QStringLiteral("No radio contact with the sensor unit: is it switched on, and the base station plugged in?"); break;
             default:                   out << QString(); break;
         }
     }
     return out;
+}
+
+bool Backend::sensorsOffline() const {
+    if (!connected_) return false;
+    for (uint8_t f : last_.sensor_fault)
+        if (SensorFault(f) == SensorFault::Offline) return true;
+    return false;
 }
 
 bool Backend::anySensorFault() const {

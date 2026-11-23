@@ -1,4 +1,4 @@
-// fake_hardware.cpp  —  laptop versions of LightTree.cpp, SensorEvents.cpp and Remote.cpp
+// fake_hardware.cpp  —  laptop versions of LightTree.cpp and Remote.cpp, plus FakeSensors
 #include "fakes/fake_hardware.hpp"
 #include <stdexcept>
 
@@ -46,9 +46,7 @@ void LightTree::onGroup(const std::vector<std::string>& names)  { for (const aut
 void LightTree::offGroup(const std::vector<std::string>& names) { for (const auto& n : names) off(n); }
 
 // ---------- Sensors ----------
-Sensors::Sensors(const std::string&) : request_(), buffer_(0) {}
-
-void Sensors::poll() {
+void FakeSensors::poll() {
     for (int l = 0; l < NUM_LANES; ++l) {
         LaneSignals& src = fake().lanes[l];
         lanes_[l] = src;
@@ -57,20 +55,21 @@ void Sensors::poll() {
     }
 }
 
-bool Sensors::enabled(int lane) const { return lane >= 0 && lane < NUM_LANES && fake().lane_enabled[lane]; }
+bool FakeSensors::enabled(int lane) const { return lane >= 0 && lane < NUM_LANES && fake().lane_enabled[lane]; }
+bool FakeSensors::online() const { return fake().sensors_online; }
 
-void Sensors::reset() {   // same as the real reset(): forget edges, keep levels
+void FakeSensors::reset() {   // the real reset() (forget edges, keep levels), on the source too
+    Sensors::reset();
     for (int l = 0; l < NUM_LANES; ++l) {
-        for (LaneSignals* ln : { &lanes_[l], &fake().lanes[l] }) {
-            for (int s = 0; s < NUM_SIGNALS; ++s) {
-                ln->rose[s]   = false;
-                ln->t_rise[s] = 0;
-                ln->t_fall[s] = 0;
-            }
-            ln->forward_armed = false;
-            ln->passed        = false;
-            ln->t_pass        = 0;
+        LaneSignals& ln = fake().lanes[l];
+        for (int s = 0; s < NUM_SIGNALS; ++s) {
+            ln.rose[s]   = false;
+            ln.t_rise[s] = 0;
+            ln.t_fall[s] = 0;
         }
+        ln.forward_armed = false;
+        ln.passed        = false;
+        ln.t_pass        = 0;
     }
 }
 

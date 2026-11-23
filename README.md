@@ -8,12 +8,14 @@ org; the website that shows race results is a separate repo there.
 | `firmware/` | Sensors, light tree, remote, timer, race DB (`firmware`, `tree_test`) | BeaglePlay only (needs libgpiod v2) |
 | `gui/`      | Qt 6 / QML touchscreen app                              | Mac, Windows, board  |
 | `common/`   | Shared headers (`protocol.h`)                           | everywhere           |
+| `nano/`     | Arduino Nano Every sketches: sensor node, base station, radio range test | PlatformIO |
 | `scripts/`  | `setup.sh`, `build.sh`, `update.sh` for the board        | board                |
 | `systemd/`  | Services that start firmware + GUI on boot              | board                |
 | `tests/`    | Unit tests for the firmware logic (fake hardware)       | Mac, Linux           |
 
 Everything builds from the **top-level** `CMakeLists.txt`. On Mac/Windows CMake prints
-`libgpiodcxx not found, skipping firmware and tree_test`. That's expected; only the GUI gets built.
+`libgpiodcxx not found, skipping firmware and tree_test`. That's expected: the GUI and
+`radio_monitor` still get built. The Nano sketches build separately with PlatformIO (below).
 
 ---
 
@@ -107,7 +109,8 @@ cd ~/RuffFirmware
 
 `setup.sh` does everything once:
 1. `apt install`s the compiler, CMake, libgpiod, libcurl, and Qt/QML packages
-2. creates an empty `/etc/ruff/firmware.env` (Supabase settings, see below)
+2. creates `/etc/ruff/firmware.env` (Supabase and sensor radio settings, see below) and the udev
+   rule that names the radio base station `/dev/ruff-radio`
 3. builds into `build/` (`scripts/build.sh`)
 4. installs `systemd/*.service` and starts **firmware** and **gui**, which also start on every boot
    (the GUI comes up right away; it doesn't wait for WiFi or the firmware)
@@ -120,6 +123,72 @@ once with `nmcli -v`. If it's missing, the Settings screen says so. A static IP 
 is optional (blank = automatic). NetworkManager remembers the network for the next boot.
 
 Settings → Restart restarts the firmware and GUI services (a few seconds), for when something's stuck.
+
+### Sensor radio (Nano Every + nRF24)
+
+The sensors aren't wired to the BeaglePlay: they connect to a **sensor node** (a Nano Every with an
+nRF24L01+ PA/LNA radio, on battery). It sends every sensor change to a **base station** (a second
+Nano Every + radio) on USB to the BeaglePlay. The light tree is still on the BeaglePlay's GPIO.
+
+```
+sensor node --2.4 GHz--> base station --USB--> BeaglePlay  (/dev/ruff-radio)
+```
+
+**Wiring, the same on both Nanos:** radio on SPI (D11 MOSI, D12 MISO, D13 SCK), CE on D9 and
+CSN on D10. On the sensor node, IRQ also goes to D8. Power the PA/LNA module from the socket adapter
+board's own 3.3 V regulator, not the Nano's 3V3 pin: it draws over 100 mA when sending, and a
+module that resets or loses packets is almost always under-powered.
+
+**Sensor node inputs** (0-5 V only; a 12 V sensor output needs an optocoupler or a divider):
+
+| Pin | Lane 1  | Pin | Lane 2  |
+|-----|---------|-----|---------|
+| D2  | BACK    | D5  | BACK    |
+| D3  | FORWARD | D6  | FORWARD |
+| D4  | ALIGN   | D7  | ALIGN   |
+
+Active-high by default; change `ACTIVE_HIGH` / `INPUT_MODE` in `nano/src/sensor_node/main.cpp` to
+match the sensors. Lane 2 is off in `LANE_ENABLED` (`firmware/src/sensors/SensorEvents.hpp`) until
+it's wired.
+
+**Flashing** ([PlatformIO](https://platformio.org/install/cli), on a laptop, one Nano on USB at a time):
+
+```bash
+cd nano
+pio run -e sensor_node  -t upload    # the Nano in the sensor unit
+pio run -e base_station -t upload    # the Nano that plugs into the BeaglePlay
+pio device monitor                   # sensor node only: prints every edge, for bench testing
+```
+
+**Range test first.** Flash `pio run -e radio_test -t upload` on both Nanos. Jumper D2 to GND on
+the far one and run it on battery. Watch the near one with `pio device monitor` while you walk the
+far one round the ring. Losses of a few % are fine (the node resends, so nothing is lost, only
+late), but if losses are steady or there are more than ~3 retries per packet, move the base station
+or raise the antennas.
+
+**Checking the link on the board:**
+
+```bash
+sudo systemctl stop firmware
+./build/firmware/radio_monitor       # every sensor change and pass, + a status line every 2 s
+sudo systemctl start firmware
+```
+
+`ONLINE` needs the base station plugged in, the sensor node on, and about 3 s for the clocks to
+sync. When the link is down, the GUI shows **Sensors offline** and a heat can't start. If it drops
+during a heat, the heat goes on: the node keeps every edge and resends it with its original time,
+so the passes appear late but timed correctly.
+
+**Accuracy.** The node timestamps each edge itself. The BeaglePlay tracks the node's and the base
+station's clocks (offset and drift: the Nano Every has no crystal), so a sensor time is accurate to
+well under 1 ms in the simulations, and splits within one lane are exact. There is a small fixed
+delay on the USB link (about 0.3-1 ms). To measure it, wire one push button to both a sensor node
+input and a spare BeaglePlay GPIO, press it ~100 times, and compare the times. Put the average
+difference (BeaglePlay minus radio, in microseconds) in `RUFF_RADIO_OFFSET_US` in
+`/etc/ruff/firmware.env`.
+
+`RUFF_SENSORS=gpio` in `/etc/ruff/firmware.env` switches back to sensors wired straight to the
+BeaglePlay (pins in `firmware/src/sensors/GpioSensors.cpp`).
 
 ### Supabase upload (optional)
 
@@ -157,7 +226,9 @@ cd ~/RuffFirmware
 
 `update.sh` doesn't install packages. If a pull adds one to `setup.sh` (like the on-screen
 keyboard, `qml6-module-qtquick-virtualkeyboard qt6-virtualkeyboard-plugin`), install it by hand
-or re-run `./scripts/setup.sh`.
+or re-run `./scripts/setup.sh`. The same goes for the `/dev/ruff-radio` udev rule: re-running
+`setup.sh` adds it (it leaves an existing `/etc/ruff/firmware.env` alone; without `RUFF_SENSORS`
+in it the firmware uses the radio).
 
 To rebuild local edits without pulling, run `./scripts/build.sh && sudo systemctl restart firmware gui`.
 

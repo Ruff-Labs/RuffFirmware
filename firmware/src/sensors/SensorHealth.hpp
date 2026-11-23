@@ -11,6 +11,7 @@
 //            beam, or a sensor stuck on. (A dog crossing breaks it for well under a second.)
 //   Wiring   ALIGN, FORWARD and BACK all active for WIRING_AFTER: a working sensor never reports
 //            all three at once, so a wire is shorted or swapped.
+//   Offline  the radio link to the sensor node is down (Sensors::online()); wins over the rest.
 //
 // No hardware: update() takes the levels poll_inputs() already read, so tests can drive it.
 class SensorHealth {
@@ -22,6 +23,9 @@ public:
     // Call every tick with the current levels of one lane.
     void update(int lane, bool align, bool forward, bool back, Clock::time_point now);
 
+    // Call every tick with Sensors::online().
+    void set_online(bool online) { online_ = online; }
+
     protocol::SensorFault fault(int lane, Clock::time_point now) const;
 
 private:
@@ -32,4 +36,5 @@ private:
     static void track(Held& h, bool on, Clock::time_point now);
 
     Held forward_[NUM_LANES], back_[NUM_LANES], all_three_[NUM_LANES];
+    bool online_ = true;
 };

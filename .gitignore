@@ -113,6 +113,10 @@ coverage/
 .tmp/
 temp/
 
+# PlatformIO (nano/)
+
+.pio/
+
 # Qt / qmake
 
 *.stash

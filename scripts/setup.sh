@@ -24,10 +24,23 @@ SUPABASE_KEY=
 BOARD_ID=
 # Optional: also send race status to a GUI running on a laptop (its IPv4 address)
 GUI_HOST=
+# Sensors: radio (sensor node via the base station on USB) or gpio (wired to the BeaglePlay)
+RUFF_SENSORS=radio
+RUFF_RADIO_DEV=/dev/ruff-radio
+# Microseconds added to every radio sensor time, from the accuracy test in the README
+RUFF_RADIO_OFFSET_US=0
 ENV
     sudo chmod 600 /etc/ruff/firmware.env
     echo "Edit /etc/ruff/firmware.env to enable Supabase upload"
 fi
+
+# The base station (an Arduino Nano Every on USB) always appears as /dev/ruff-radio,
+# whatever ttyACM number it gets. Plug in only the base station: the sensor node runs on battery.
+sudo tee /etc/udev/rules.d/99-ruff-radio.rules >/dev/null <<'UDEV'
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0058", SYMLINK+="ruff-radio"
+UDEV
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=tty
 
 # Build before enabling the services, otherwise they start with no binaries
 ./scripts/build.sh

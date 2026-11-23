@@ -136,6 +136,7 @@ Rectangle {
                     Rectangle {   // status LED with a soft halo
                         id: led
                         readonly property color tone: !backend.connected      ? Theme.danger
+                                                    : backend.sensorsOffline ? Theme.danger
                                                     : backend.anySensorFault ? Theme.warning
                                                     : Theme.success
                         Layout.preferredWidth: 8
@@ -152,6 +153,7 @@ Rectangle {
                     Text {
                         Layout.fillWidth: true
                         text: !backend.connected      ? "Firmware not running"
+                            : backend.sensorsOffline ? "Sensors offline"
                             : backend.anySensorFault ? "Sensor fault"
                             : "System ready"
                         color: Theme.textPrimary
